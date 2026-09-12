@@ -1,0 +1,169 @@
+{% load quote_format %}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quotation {{ quote.reference_number }}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 14mm 14mm 16mm;
+    @bottom-left { content: "{{ quote.reference_number }}"; font-size: 7.5pt; color: #888; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 7.5pt; color: #888; }
+  }
+  /* On <html> rather than <body> so the page-margin footer inherits the font too. */
+  html { font-family: "DejaVu Sans", "Noto Sans", "Liberation Sans", Arial, sans-serif; font-size: 9.5pt; line-height: 1.35; color: #111; }
+  body { margin: 0; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { vertical-align: top; }
+
+  .header td { padding: 0; }
+  .header .logo-cell { width: 32mm; padding-right: 4mm; }
+  .logo { max-width: 28mm; max-height: 22mm; }
+  .business-name { font-size: 15pt; font-weight: bold; letter-spacing: -0.2pt; margin-bottom: 1.2mm; }
+  .business-details { color: #555; font-size: 8.8pt; line-height: 1.5; }
+  .doc-title { text-align: right; width: 60mm; }
+  .doc-title h1 { font-size: 13pt; letter-spacing: 1.5pt; margin: 0 0 2mm; }
+  .doc-meta { width: auto; margin-left: auto; }
+  .doc-meta th { text-align: left; font-weight: normal; color: #888; padding: 0.4mm 3mm 0.4mm 0; }
+  .doc-meta td { text-align: right; padding: 0.4mm 0; }
+
+  .rule { border: 0; border-top: 1.6pt solid #111; margin: 4mm 0 3.5mm; }
+
+  .parties td { padding: 0.8mm 0; width: 50%; }
+  .label { display: block; font-size: 7.5pt; color: #888; margin-bottom: 0.4mm; }
+  .value { font-size: 10pt; font-weight: bold; }
+  .muted { color: #555; }
+
+  .items { margin-top: 5mm; }
+  .items th { color: #555; font-size: 8pt; font-weight: bold; padding: 2mm; text-align: left; border-bottom: 0.8pt solid #d4d4d4; }
+  .items td { padding: 2mm; }
+  .items th:first-child, .items td:first-child { padding-left: 0; }
+  .items th:last-child, .items td:last-child { padding-right: 0; }
+  .items .num { text-align: right; white-space: nowrap; }
+  .items .sn { width: 9mm; color: #888; }
+  .items .col-price { width: 27mm; }
+  .items .col-qty { width: 24mm; }
+  .items .col-amount { width: 31mm; }
+  .items tbody { page-break-inside: avoid; }
+  .items .main-row .desc { font-weight: bold; }
+  .items .colour-row td { padding-top: 0; padding-bottom: 0.8mm; font-size: 8.8pt; color: #555; }
+  .items .colour-row .desc { padding-left: 6mm; }
+  .items .colour-row.end td { padding-bottom: 2.2mm; }
+  .items tr.end td { border-bottom: 0.6pt solid #e5e5e5; }
+
+  .summary { margin-top: 5mm; page-break-inside: avoid; }
+  .summary .payment { padding-right: 8mm; }
+  .payment-box { background: #f5f5f5; padding: 3mm 3.5mm; border-radius: 1.5mm; line-height: 1.5; }
+  .summary .totals-cell { width: 80mm; }
+  .totals th { text-align: left; font-weight: normal; color: #555; padding: 1.3mm 0; }
+  .totals td { text-align: right; padding: 1.3mm 0; white-space: nowrap; }
+  .totals .grand th, .totals .grand td { border-top: 1.2pt solid #111; padding-top: 2.4mm; color: #111; font-weight: bold; font-size: 11.5pt; }
+
+  .notes { margin-top: 7mm; padding-top: 3mm; border-top: 0.6pt solid #e5e5e5; font-size: 8.6pt; color: #555; }
+  .notes p { margin: 0 0 1.4mm; }
+  .notes strong { color: #111; }
+</style>
+</head>
+<body>
+  <table class="header">
+    <tr>
+      {% if logo_uri %}<td class="logo-cell"><img class="logo" src="{{ logo_uri }}" alt=""></td>{% endif %}
+      <td>
+        <div class="business-name">{{ business.business_name }}</div>
+        <div class="business-details">
+          {% if business.address %}{{ business.address|linebreaksbr }}<br>{% endif %}
+          {% if business.phone_list %}Phone: {{ business.phone_list|join:", " }}<br>{% endif %}
+          {% if business.email %}Email: {{ business.email }}{% endif %}
+        </div>
+      </td>
+      <td class="doc-title">
+        <h1>QUOTATION</h1>
+        <table class="doc-meta">
+          <tr><th>Ref</th><td>{{ quote.reference_number }}</td></tr>
+          <tr><th>Date</th><td>{{ quote.date|date:"d/m/Y" }}</td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  <hr class="rule">
+
+  <table class="parties">
+    <tr>
+      <td><span class="label">Quotation for</span><span class="value">{{ quote.customer_name }}</span></td>
+      <td>
+        <span class="label">Prepared by</span><span class="value">{{ quote.staff_name }}</span>
+        {% if quote.staff_phone %}<span class="muted"> · {{ quote.staff_phone }}</span>{% endif %}
+      </td>
+    </tr>
+    {% if quote.product_manufacturer %}
+    <tr>
+      <td colspan="2"><span class="label">Product / Manufacturer</span><span class="value">{{ quote.product_manufacturer }}</span></td>
+    </tr>
+    {% endif %}
+  </table>
+
+  <table class="items">
+    <thead>
+      <tr>
+        <th class="sn">S/N</th>
+        <th>Item Description</th>
+        <th class="num col-price">Price (₦)</th>
+        <th class="num col-qty">Qty</th>
+        <th class="num col-amount">Amount (₦)</th>
+      </tr>
+    </thead>
+    {% for item in quote.line_items.all %}
+    <tbody>
+      <tr class="main-row{% if not item.has_colours %} end{% endif %}">
+        <td class="sn">{{ forloop.counter }}</td>
+        <td class="desc">{{ item.description }}</td>
+        <td class="num">{{ item.unit_price|naira }}</td>
+        <td class="num">{{ item.total_quantity|quantity:item.unit }}</td>
+        <td class="num">{{ item.amount|naira }}</td>
+      </tr>
+      {% if item.has_colours %}{% for entry in item.colours.all %}
+      <tr class="colour-row{% if forloop.last %} end{% endif %}">
+        <td></td>
+        <td class="desc">{{ entry.colour }}</td>
+        <td></td>
+        <td class="num">{{ entry.quantity|quantity }}</td>
+        <td></td>
+      </tr>
+      {% endfor %}{% endif %}
+    </tbody>
+    {% endfor %}
+  </table>
+
+  <table class="summary">
+    <tr>
+      <td class="payment">
+        {% with pay=quote.payment_details %}{% if pay.bank_name or pay.account_number %}
+        <div class="payment-box">
+          <span class="label">Payment should be made to</span>
+          <strong>{{ pay.account_name }}</strong><br>
+          {{ pay.bank_name }}{% if pay.bank_name and pay.account_number %} — {% endif %}{% if pay.account_number %}A/c No. {{ pay.account_number }}{% endif %}
+        </div>
+        {% endif %}{% endwith %}
+      </td>
+      <td class="totals-cell">
+        <table class="totals">
+          <tr><th>Sub Total</th><td>{{ quote.subtotal|naira }}</td></tr>
+          <tr><th>VAT{% if quote.vat_percentage %} ({{ quote.vat_percentage|percent }}){% endif %}</th><td>{{ quote.vat_amount|naira_or_dash }}</td></tr>
+          <tr><th>Transport</th><td>{{ quote.transport_cost|naira_or_dash }}</td></tr>
+          <tr class="grand"><th>Grand Total</th><td>₦{{ quote.grand_total|naira }}</td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  {% if business.disclaimer or business.payment_terms or business.quote_validity or quote.notes %}
+  <div class="notes">
+    {% if business.disclaimer %}<p><strong>NB:</strong> {{ business.disclaimer }}</p>{% endif %}
+    {% if business.payment_terms %}<p><strong>Payment Terms:</strong> {{ business.payment_terms }}</p>{% endif %}
+    {% if business.quote_validity %}<p><strong>Quotation Validity:</strong> {{ business.quote_validity }}</p>{% endif %}
+    {% if quote.notes %}<p><strong>Notes:</strong> {{ quote.notes|linebreaksbr }}</p>{% endif %}
+  </div>
+  {% endif %}
+</body>
+</html>

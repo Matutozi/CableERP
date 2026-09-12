@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.sqlite3
+# No env files at all — not even an example. The settings are documented in README.md.
+.env
+*.env
+.env.*
+backend/.env
+backend/media/
+backend/staticfiles/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

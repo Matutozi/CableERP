@@ -1,0 +1,21 @@
+[Unit]
+Description=CableERP (Django via Gunicorn)
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+User=cableerp
+Group=cableerp
+WorkingDirectory=/srv/cableerp/backend
+EnvironmentFile=/srv/cableerp/backend/.env
+ExecStart=/srv/cableerp/backend/venv/bin/gunicorn --config /srv/cableerp/deploy/gunicorn.conf.py config.wsgi:application
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
