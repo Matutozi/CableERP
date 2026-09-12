@@ -145,8 +145,10 @@ if SENTRY_DSN:
 if not DEBUG and not TESTING:
     # The app carries customer prices and bank details, so keep it on HTTPS only.
     SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT", True)
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+    # Secure cookies are only sent over HTTPS, so sign-in is impossible without a certificate.
+    # Set DJANGO_SECURE_COOKIES=false only while trialling on a plain-HTTP address.
+    SESSION_COOKIE_SECURE = env_bool("DJANGO_SECURE_COOKIES", True)
+    CSRF_COOKIE_SECURE = env_bool("DJANGO_SECURE_COOKIES", True)
     SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_HSTS_SECONDS", "3600"))  # raise to a year once HTTPS is proven
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     if env_bool("DJANGO_BEHIND_PROXY", False):
