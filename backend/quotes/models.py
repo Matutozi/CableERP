@@ -5,11 +5,23 @@ from django.db import models
 from django.utils import timezone
 
 from accounts.models import BusinessProfile
-from catalogue.models import MAX_PRICE, MAX_QUANTITY, QUOTE_UNITS, Accessory, CableSize
+from catalogue.models import (
+    COST_DECIMAL_PLACES,
+    MAX_PRICE,
+    MAX_QUANTITY,
+    QUOTE_UNITS,
+    Accessory,
+    CableSize,
+)
 
 # Cable type names that are just catalogue buckets, so the size label alone describes the item
 # (e.g. "RG6 Coaxial" rather than "RG6 Coaxial Other").
 GENERIC_TYPE_NAMES = {"other", "others", "misc", "miscellaneous"}
+
+# Which cost a quote is measured against. Replacement cost is what a refill costs today, and
+# that is the number to price against while the naira moves; the weighted average is kept on
+# the catalogue row for reporting profit later.
+COST_BASIS_LAST = "last"
 
 
 def money(value):
@@ -103,6 +115,9 @@ class Quote(models.Model):
                 QuoteLineItemColour(line_item=copy, colour=entry.colour, quantity=entry.quantity)
                 for entry in item.colours.all()
             )
+        # A revision is written today, so it is costed today rather than inheriting the
+        # cost the original was quoted against.
+        snapshot_costs(revision)
         return revision
 
     @property
@@ -134,6 +149,51 @@ class Quote(models.Model):
     def grand_total(self):
         return self.subtotal + self.vat_amount + self.transport_cost
 
+    # --- Cost and margin -------------------------------------------------------------
+    # All of these ignore lines whose cost was never recorded, and report separately how much
+    # of the quote they cover. Counting an unknown cost as zero would show 100% margin on every
+    # item nobody has costed yet, which is worse than admitting the gap.
+
+    @property
+    def _costed_lines(self):
+        return [item for item in self.line_items.all() if item.unit_cost is not None]
+
+    @property
+    def costed_subtotal(self):
+        """Revenue from the lines whose cost is known — the only fair denominator for margin."""
+        return money(sum((item.amount for item in self._costed_lines), Decimal("0")))
+
+    @property
+    def total_cost(self):
+        lines = self._costed_lines
+        return money(sum((item.cost_amount for item in lines), Decimal("0"))) if lines else None
+
+    @property
+    def total_margin(self):
+        cost = self.total_cost
+        return None if cost is None else self.costed_subtotal - cost
+
+    @property
+    def margin_percentage(self):
+        margin = self.total_margin
+        revenue = self.costed_subtotal
+        if margin is None or revenue <= 0:
+            return None
+        return (margin / revenue * 100).quantize(Decimal("0.01"))
+
+    @property
+    def margin_coverage(self):
+        """How much of this quote the margin figure actually speaks for."""
+        items = list(self.line_items.all())
+        subtotal = self.subtotal
+        return {
+            "costed_items": len(self._costed_lines),
+            "total_items": len(items),
+            "value_share": (self.costed_subtotal / subtotal * 100).quantize(Decimal("0.01"))
+            if subtotal > 0
+            else Decimal("0.00"),
+        }
+
 
 class QuoteLineItem(models.Model):
     """One product on a quote. Names, unit and price are copied from the catalogue so the quote never changes."""
@@ -158,6 +218,13 @@ class QuoteLineItem(models.Model):
     unit_price = models.DecimalField(
         max_digits=15, decimal_places=2, validators=[MinValueValidator(0), MaxValueValidator(MAX_PRICE)]
     )
+    # What the stock cost when this quote was written, per unit. Frozen like the price beside it:
+    # restocking next month must not rewrite the margin on a quote already sent. Null means no
+    # purchase has ever been recorded for this item, and the margin is honestly unknown.
+    unit_cost = models.DecimalField(
+        max_digits=17, decimal_places=COST_DECIMAL_PLACES, null=True, blank=True, editable=False
+    )
+    cost_basis = models.CharField(max_length=10, blank=True, editable=False)
     order = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -186,6 +253,22 @@ class QuoteLineItem(models.Model):
     def amount(self):
         return money(self.total_quantity * self.unit_price)
 
+    @property
+    def cost_amount(self):
+        return None if self.unit_cost is None else money(self.total_quantity * self.unit_cost)
+
+    @property
+    def margin_amount(self):
+        cost = self.cost_amount
+        return None if cost is None else self.amount - cost
+
+    @property
+    def margin_percentage(self):
+        margin = self.margin_amount
+        if margin is None or self.amount <= 0:
+            return None
+        return (margin / self.amount * 100).quantize(Decimal("0.01"))
+
 
 class QuoteLineItemColour(models.Model):
     """Quantity of one colour on a line item. Items without colour variants have a single row with colour ""."""
@@ -201,3 +284,21 @@ class QuoteLineItemColour(models.Model):
 
     def __str__(self):
         return f"{self.colour or 'Qty'}: {self.quantity}"
+
+
+def snapshot_costs(quote):
+    """Freeze the current replacement cost onto each line of a quote.
+
+    Called on every save while a quote is a draft, and once more as it is marked sent — after
+    which `is_locked` refuses further edits, so the figures stop moving for good.
+
+    A line only gets a cost if it still points at a catalogue entry. Anything typed free-hand
+    into the quote builder, or whose catalogue entry has since been deleted, stays unknown.
+    """
+    lines = list(quote.line_items.select_related("cable_size", "accessory"))
+    for line in lines:
+        row = line.cable_size or line.accessory
+        line.unit_cost = row.last_unit_cost if row else None
+        line.cost_basis = COST_BASIS_LAST if line.unit_cost is not None else ""
+    QuoteLineItem.objects.bulk_update(lines, ["unit_cost", "cost_basis"])
+    return lines

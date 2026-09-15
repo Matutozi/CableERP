@@ -4,10 +4,6 @@ __pycache__/
 venv/
 .venv/
 *.sqlite3
-# No env files at all — not even an example. The settings are documented in README.md.
-.env
-*.env
-.env.*
 backend/.env
 backend/media/
 backend/staticfiles/
@@ -20,3 +16,7 @@ frontend/dist/
 .vscode/
 .idea/
 .DS_Store
+
+.env
+backend/.env.example
+backend/*.sqlite3.*

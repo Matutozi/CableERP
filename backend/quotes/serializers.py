@@ -5,29 +5,25 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from accounts.models import BusinessProfile
-from catalogue.models import FRACTIONAL_UNITS, MAX_PRICE, MAX_QUANTITY, Accessory, CableSize
+from catalogue.models import FRACTIONAL_UNITS, MAX_PRICE, MAX_QUANTITY
+from catalogue.serializers import BusinessAccessoryField, BusinessCableSizeField
 
-from .models import Quote, QuoteLineItem, QuoteLineItemColour
+from .models import Quote, QuoteLineItem, QuoteLineItemColour, snapshot_costs
 
 TOTAL_FIELD = {"max_digits": 20, "decimal_places": 2, "read_only": True}
 # Bounds so a line can never hold a number the totals cannot represent (see MAX_PRICE / MAX_QUANTITY).
 PRICE_FIELD = {"max_digits": 15, "decimal_places": 2, "min_value": Decimal("0"), "max_value": MAX_PRICE}
 # Generous for a quotation, and it keeps one request from asking for an unbounded PDF.
 MAX_LINE_ITEMS = 200
+# Cost carries four decimal places because it is derived from purchases, not charged.
+COST_FIELD = {"max_digits": 17, "decimal_places": 4, "read_only": True}
+PERCENTAGE_FIELD = {"max_digits": 7, "decimal_places": 2, "read_only": True}
 
-
-class BusinessCableSizeField(serializers.PrimaryKeyRelatedField):
-    """Only accepts catalogue sizes belonging to the signed-in business."""
-
-    def get_queryset(self):
-        return CableSize.objects.filter(cable_type__business=self.context["business"])
-
-
-class BusinessAccessoryField(serializers.PrimaryKeyRelatedField):
-    """Only accepts accessories belonging to the signed-in business."""
-
-    def get_queryset(self):
-        return Accessory.objects.filter(business=self.context["business"])
+# What the seller paid, and what they stand to make. Never shown to a customer: these must
+# not reach quote_pdf.html, and Phase 6 hides them from staff who aren't the owner — keeping
+# them listed here means that is one edit rather than an audit of every endpoint.
+LINE_COST_FIELDS = ["unit_cost", "cost_amount", "margin_amount", "margin_percentage"]
+QUOTE_COST_FIELDS = ["total_cost", "costed_subtotal", "total_margin", "margin_percentage", "margin_coverage"]
 
 
 class QuoteLineItemColourSerializer(serializers.ModelSerializer):
@@ -55,6 +51,10 @@ class QuoteLineItemSerializer(serializers.ModelSerializer):
     description = serializers.CharField(read_only=True)
     total_quantity = serializers.DecimalField(**TOTAL_FIELD)
     amount = serializers.DecimalField(**TOTAL_FIELD)
+    unit_cost = serializers.DecimalField(**COST_FIELD)
+    cost_amount = serializers.DecimalField(**TOTAL_FIELD)
+    margin_amount = serializers.DecimalField(**TOTAL_FIELD)
+    margin_percentage = serializers.DecimalField(**PERCENTAGE_FIELD)
 
     class Meta:
         model = QuoteLineItem
@@ -73,6 +73,7 @@ class QuoteLineItemSerializer(serializers.ModelSerializer):
             "description",
             "total_quantity",
             "amount",
+            *LINE_COST_FIELDS,
         ]
         read_only_fields = ["id", "order"]
 
@@ -110,6 +111,11 @@ class QuoteSerializer(serializers.ModelSerializer):
     subtotal = serializers.DecimalField(**TOTAL_FIELD)
     vat_amount = serializers.DecimalField(**TOTAL_FIELD)
     grand_total = serializers.DecimalField(**TOTAL_FIELD)
+    total_cost = serializers.DecimalField(**TOTAL_FIELD)
+    costed_subtotal = serializers.DecimalField(**TOTAL_FIELD)
+    total_margin = serializers.DecimalField(**TOTAL_FIELD)
+    margin_percentage = serializers.DecimalField(**PERCENTAGE_FIELD)
+    margin_coverage = serializers.JSONField(read_only=True)
 
     class Meta:
         model = Quote
@@ -135,6 +141,7 @@ class QuoteSerializer(serializers.ModelSerializer):
             "subtotal",
             "vat_amount",
             "grand_total",
+            *QUOTE_COST_FIELDS,
             "created_at",
             "updated_at",
         ]
@@ -148,6 +155,12 @@ class QuoteSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+
+    def validate_date(self, value):
+        """The quote date drives the reference number, so a future one misfiles the quote too."""
+        if value > timezone.localdate():
+            raise serializers.ValidationError("A quote can't be dated in the future. Check the date.")
+        return value
 
     def validate_line_items(self, value):
         if not value:
@@ -173,6 +186,7 @@ class QuoteSerializer(serializers.ModelSerializer):
             **validated_data,
         )
         self._save_line_items(quote, items)
+        snapshot_costs(quote)
         return quote
 
     @transaction.atomic
@@ -191,6 +205,9 @@ class QuoteSerializer(serializers.ModelSerializer):
             # Line items are snapshots with no identity worth preserving, so an edit replaces them wholesale.
             instance.line_items.all().delete()
             self._save_line_items(instance, items)
+        # Re-costed on every save while the quote is a draft; the save that marks it sent is the
+        # last one this method allows, so that is where the figures freeze.
+        snapshot_costs(instance)
         return instance
 
     def _save_line_items(self, quote, items):
@@ -204,7 +221,18 @@ class QuoteSerializer(serializers.ModelSerializer):
 
 class QuoteListSerializer(serializers.ModelSerializer):
     grand_total = serializers.DecimalField(**TOTAL_FIELD)
+    total_margin = serializers.DecimalField(**TOTAL_FIELD)
 
     class Meta:
         model = Quote
-        fields = ["id", "reference_number", "customer_name", "staff_name", "date", "status", "grand_total", "created_at"]
+        fields = [
+            "id",
+            "reference_number",
+            "customer_name",
+            "staff_name",
+            "date",
+            "status",
+            "grand_total",
+            "total_margin",
+            "created_at",
+        ]

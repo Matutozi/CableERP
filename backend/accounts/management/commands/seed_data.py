@@ -6,7 +6,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from accounts.models import BusinessProfile
-from catalogue.models import CableSize, CableType
+from catalogue.models import CableSize, CableType, record_price
 
 PROFILE = {
     "business_name": "Acme-Oaks Ventures Limited",
@@ -86,5 +86,9 @@ class Command(BaseCommand):
                 if not size_created and reset_prices:
                     size.default_price = Decimal(price)
                     size.save(update_fields=["default_price"])
+                # Seeding writes through the ORM, so the viewsets that normally log a price
+                # point never run. Without this a fresh install has a price trend with no
+                # price in it. record_price is a no-op when the price has not moved.
+                record_price(size)
 
         self.stdout.write(self.style.SUCCESS(f"Seeded {profile.business_name}: {profile.cable_types.count()} cable types."))

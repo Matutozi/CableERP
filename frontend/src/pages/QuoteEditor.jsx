@@ -7,8 +7,8 @@ import MoneyInput from "../components/MoneyInput.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import useMediaQuery from "../hooks/useMediaQuery.js";
 import { api } from "../services/api.js";
-import { formatDate, formatNaira, isFractionalUnit, todayIso, toNumber, unitLabel } from "../services/format.js";
-import { DEFAULT_COLOURS, coloursFor, findCableType, quoteTotals } from "../services/quoteMath.js";
+import { formatDate, formatNaira, formatPercent, isFractionalUnit, todayIso, toNumber, unitLabel } from "../services/format.js";
+import { DEFAULT_COLOURS, coloursFor, findCableType, marginTotals, quoteTotals, unitCostFor } from "../services/quoteMath.js";
 
 const BLANK_FIELDS = {
   customer_name: "",
@@ -129,11 +129,17 @@ function QuoteEditor({ quoteId }) {
     return <div className="page">{error ? <div className="alert alert-error">{error}</div> : <p className="muted">Loading…</p>}</div>;
   }
 
-  const resolved = items.map((item) => ({
-    ...item,
-    colours: coloursFor(item, item.kind === "cable" ? findCableType(cableTypes, item.cable_type_name) : null),
-  }));
+  const resolved = items.map((item) => {
+    const cableType = item.kind === "cable" ? findCableType(cableTypes, item.cable_type_name) : null;
+    return {
+      ...item,
+      colours: coloursFor(item, cableType),
+      // Read live from the catalogue while editing; the server freezes its own copy on save.
+      unitCost: unitCostFor(item, cableType, accessories),
+    };
+  });
   const totals = quoteTotals(resolved, fields.vat_percentage, fields.transport_cost);
+  const margin = marginTotals(resolved, totals.subtotal);
   // A sent quote is the record of what the customer received, so it is read-only until revised.
   const locked = saved?.status === "sent";
   const setField = (name) => (event) => setFields({ ...fields, [name]: event.target.value });
@@ -315,6 +321,19 @@ function QuoteEditor({ quoteId }) {
         <MoneyInput className="mini-input" value={fields.transport_cost} aria-label="Transport cost" disabled={locked}
           onChange={(value) => setFields({ ...fields, transport_cost: value })} />
       </div>
+      {margin.known && (
+        <div className={margin.margin < 0 ? "t-row t-margin loss" : "t-row t-margin"}>
+          <span>
+            Margin
+            {margin.costedItems < margin.totalItems && (
+              <span className="t-coverage"> on {margin.costedItems} of {margin.totalItems}</span>
+            )}
+          </span>
+          <span className="num">
+            {margin.margin < 0 ? "−" : ""}₦{formatNaira(Math.abs(margin.margin))} · {formatPercent(margin.percentage)}
+          </span>
+        </div>
+      )}
     </div>
   );
 
@@ -389,8 +408,9 @@ function QuoteEditor({ quoteId }) {
             <div className="empty">No items yet. Add a cable or an accessory below.</div>
           ) : (
             <div className="item-list">
-              {items.map((item) => (
+              {resolved.map((item) => (
                 <LineItemCard key={item.key} item={item} cableTypes={cableTypes} accessories={accessories}
+                  unitCost={item.unitCost}
                   error={itemErrors[item.key]} autoFocus={item.key === focusKey}
                   adding={busy === `catalogue-${item.key}`}
                   onChange={(patch) => updateItem(item.key, patch)}
