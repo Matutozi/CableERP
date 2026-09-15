@@ -15,7 +15,7 @@ from .serializers import (
     AuditLogSerializer,
     BusinessProfileSerializer,
     LoginSerializer,
-    LogoSerializer,
+    image_upload_serializer,
     RegisterSerializer,
     UserSerializer,
 )
@@ -102,20 +102,30 @@ class ActivityView(generics.ListAPIView):
 
 
 class ProfileLogoView(APIView):
+    """Upload or remove one of the profile's images. `field` picks which: the business logo by default."""
+
     parser_classes = [MultiPartParser, FormParser]
+    field = "logo"
 
     def post(self, request):
         profile = get_business(request)
-        old_logo = profile.logo.name
-        serializer = LogoSerializer(profile, data=request.data)
+        image = getattr(profile, self.field)
+        old_name = image.name
+        serializer = image_upload_serializer(self.field)(profile, data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        if old_logo and old_logo != profile.logo.name:
-            profile.logo.storage.delete(old_logo)
+        image = getattr(profile, self.field)
+        if old_name and old_name != image.name:
+            image.storage.delete(old_name)
         return Response(BusinessProfileSerializer(profile, context={"request": request}).data)
 
     def delete(self, request):
         profile = get_business(request)
-        if profile.logo:
-            profile.logo.delete(save=True)
+        image = getattr(profile, self.field)
+        if image:
+            image.delete(save=True)
         return Response(BusinessProfileSerializer(profile, context={"request": request}).data)
+
+
+class ProfileBrandLogoView(ProfileLogoView):
+    field = "brand_logo"

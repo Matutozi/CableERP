@@ -20,6 +20,12 @@ class BusinessProfile(models.Model):
     phone_numbers = models.CharField(max_length=255, blank=True, help_text="Comma-separated")
     email = models.EmailField(blank=True)
     logo = models.ImageField(upload_to="logos/", blank=True)
+    # Distributors print the maker's mark beside their own ("Product of COLEMAN WIRES AND CABLES"),
+    # on quotations and waybills alike: it is the brand the customer is actually buying.
+    brand_logo = models.ImageField(
+        upload_to="logos/", blank=True,
+        help_text="Logo of the manufacturer whose cables you distribute, shown beside your own.",
+    )
     bank_name = models.CharField(max_length=100, blank=True)
     account_name = models.CharField(max_length=200, blank=True)
     account_number = models.CharField(max_length=20, blank=True)
@@ -57,6 +63,9 @@ class AuditLog(models.Model):
         QUOTE_DELETED = "quote_deleted", "Quote deleted"
         PURCHASE_RECORDED = "purchase_recorded", "Purchase recorded"
         PURCHASE_DELETED = "purchase_deleted", "Purchase deleted"
+        WAYBILL_CREATED = "waybill_created", "Waybill created"
+        WAYBILL_UPDATED = "waybill_updated", "Waybill edited"
+        WAYBILL_DELETED = "waybill_deleted", "Waybill deleted"
 
     business = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name="audit_log")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+")

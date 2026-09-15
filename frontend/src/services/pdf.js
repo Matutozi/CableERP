@@ -1,9 +1,15 @@
 import { api } from "./api.js";
 
-async function fetchQuotePdf(quote) {
-  const response = await api.quotePdf(quote.id);
+// Each document type knows how to fetch its PDF and what the file is called.
+const DOCUMENTS = {
+  quote: { fetch: (doc) => api.quotePdf(doc.id), title: (doc) => `Quotation ${doc.reference_number}` },
+  waybill: { fetch: (doc) => api.waybillPdf(doc.id), title: (doc) => `Waybill ${doc.reference_number}` },
+};
+
+async function fetchPdf(kind, doc) {
+  const response = await DOCUMENTS[kind].fetch(doc);
   const blob = await response.blob();
-  return new File([blob], `${quote.reference_number}.pdf`, { type: "application/pdf" });
+  return new File([blob], `${doc.reference_number}.pdf`, { type: "application/pdf" });
 }
 
 function saveFile(file) {
@@ -17,25 +23,16 @@ function saveFile(file) {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
-export async function downloadQuotePdf(quote) {
-  saveFile(await fetchQuotePdf(quote));
-}
-
 /** True where the browser can hand a PDF to WhatsApp, email etc. (mostly phones). */
 export function canShareFiles() {
   if (typeof navigator.canShare !== "function") return false;
-  return navigator.canShare({ files: [new File([""], "quote.pdf", { type: "application/pdf" })] });
+  return navigator.canShare({ files: [new File([""], "document.pdf", { type: "application/pdf" })] });
 }
 
-/**
- * Open the phone's share sheet with the quote PDF attached.
- * Returns "shared", "cancelled", or "downloaded" when the browser refuses to share
- * (some, notably iOS Safari, won't share after a slow network fetch).
- */
-export async function shareQuotePdf(quote, text) {
-  const file = await fetchQuotePdf(quote);
+async function share(kind, doc, text) {
+  const file = await fetchPdf(kind, doc);
   try {
-    await navigator.share({ files: [file], title: `Quotation ${quote.reference_number}`, text });
+    await navigator.share({ files: [file], title: DOCUMENTS[kind].title(doc), text });
     return "shared";
   } catch (error) {
     if (error.name === "AbortError") return "cancelled";
@@ -43,3 +40,14 @@ export async function shareQuotePdf(quote, text) {
     return "downloaded";
   }
 }
+
+export const downloadQuotePdf = async (quote) => saveFile(await fetchPdf("quote", quote));
+export const downloadWaybillPdf = async (waybill) => saveFile(await fetchPdf("waybill", waybill));
+
+/**
+ * Open the phone's share sheet with the PDF attached.
+ * Returns "shared", "cancelled", or "downloaded" when the browser refuses to share
+ * (some, notably iOS Safari, won't share after a slow network fetch).
+ */
+export const shareQuotePdf = (quote, text) => share("quote", quote, text);
+export const shareWaybillPdf = (waybill, text) => share("waybill", waybill, text);

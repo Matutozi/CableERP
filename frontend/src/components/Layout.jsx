@@ -18,6 +18,8 @@ function initials(user) {
 function screenTitle(pathname) {
   if (pathname === "/") return "Dashboard";
   if (pathname === "/quotes/new") return "New quote";
+  if (pathname === "/quotes/waybills") return "Waybills";
+  if (pathname.startsWith("/quotes/waybills/")) return "Waybill";
   if (pathname.endsWith("/preview")) return "Quote preview";
   if (pathname.startsWith("/quotes/")) return "Quote";
   if (pathname.startsWith("/quotes")) return "Quotes";

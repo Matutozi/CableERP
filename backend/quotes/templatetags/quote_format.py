@@ -52,3 +52,9 @@ def quantity(value, unit=""):
 @register.filter
 def percent(value):
     return f"{_plain(value)}%"
+
+
+@register.filter
+def colour_quantity(item, colour):
+    """A waybill line's quantity in one colour column; None when the line isn't sold by colour ("NA")."""
+    return item.quantity_for(colour)

@@ -85,6 +85,7 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
     # A path, never an absolute URL: the app and the API share an origin, and an absolute one built from
     # Django's own socket (http://127.0.0.1:8000/...) points a phone at itself.
     logo = serializers.SerializerMethodField()
+    brand_logo = serializers.SerializerMethodField()
     current_password = serializers.CharField(write_only=True, required=False, allow_blank=True,
                                              style={"input_type": "password"})
 
@@ -97,6 +98,7 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
             "phone_numbers",
             "email",
             "logo",
+            "brand_logo",
             "bank_name",
             "account_name",
             "account_number",
@@ -111,6 +113,9 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
 
     def get_logo(self, profile):
         return profile.logo.url if profile.logo else None
+
+    def get_brand_logo(self, profile):
+        return profile.brand_logo.url if profile.brand_logo else None
 
     def _changed_bank_fields(self, attrs):
         return [name for name in BANK_FIELDS if name in attrs and attrs[name] != getattr(self.instance, name)]
@@ -155,13 +160,21 @@ class AuditLogSerializer(serializers.ModelSerializer):
         return entry.user.get_full_name() or entry.user.username
 
 
-class LogoSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = BusinessProfile
-        fields = ["logo"]
-        extra_kwargs = {"logo": {"required": True, "allow_null": False}}
+def image_upload_serializer(field):
+    """An upload serializer for one image field on the business profile (the logo, or the brand logo)."""
 
-    def validate_logo(self, value):
-        if value.size > MAX_LOGO_BYTES:
-            raise serializers.ValidationError("Logo must be 2 MB or smaller.")
-        return value
+    class ImageUploadSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = BusinessProfile
+            fields = [field]
+            extra_kwargs = {field: {"required": True, "allow_null": False}}
+
+        def validate(self, attrs):
+            if attrs[field].size > MAX_LOGO_BYTES:
+                raise serializers.ValidationError({field: "Logo must be 2 MB or smaller."})
+            return attrs
+
+    return ImageUploadSerializer
+
+
+LogoSerializer = image_upload_serializer("logo")

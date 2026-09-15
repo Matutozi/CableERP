@@ -534,6 +534,7 @@ Quote      + customer(FK, null) outcome{open,accepted,declined,expired}
 - **Cancelling** a sale requires a reason, is recorded in history, and — from Phase 5 — returns
   stock.
 - **Customer deletion** is a soft archive; sales must never lose their customer.
+- **Waybills already exist, made from quotes.** They were built ahead of this phase at the owner's request, without sale orders. When sale orders land, a waybill should be creatable from a sale as well, and `Waybill.quote` sits alongside a new `Waybill.sale` rather than being replaced.
 
 ### 10.6 Acceptance criteria
 
@@ -1037,3 +1038,4 @@ seeded — they vary too much between sellers.
 | Version | Date | Change |
 |---|---|---|
 | 1.0 | 13 Sep 2026 | First consolidated PRD. Phases 1–2 documented as built; 3–6 specified |
+| 1.1 | 15 Sep 2026 | Waybills from quotations and the manufacturer's logo built ahead of Phase 3 |

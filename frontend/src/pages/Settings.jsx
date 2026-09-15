@@ -20,14 +20,51 @@ const FIELDS = [
 // Changing these asks for the password again, because they decide where customers send money.
 const BANK_FIELDS = ["bank_name", "account_name", "account_number"];
 
+/** An image upload with drag-and-drop, used for the business logo and the manufacturer's logo. */
+function LogoField({ label, hint, image, busy, disabled, onUpload, onRemove }) {
+  const [dragging, setDragging] = useState(false);
+  return (
+    <div className="logo-field">
+      <span className="field-label">{label}</span>
+      <label className={dragging ? "dropzone dragging" : "dropzone"}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragging(false);
+          onUpload(event.dataTransfer.files[0]);
+        }}>
+        <input type="file" accept="image/*" hidden disabled={disabled}
+          onChange={(event) => {
+            onUpload(event.target.files[0]);
+            event.target.value = "";
+          }} />
+        <span className="dropzone-thumb">{image && <img src={image} alt={label} />}</span>
+        <span>
+          <span className="dropzone-title">
+            {busy ? "Uploading…" : image ? "Tap to replace, or drop a file" : "Tap to upload, or drop a file"}
+          </span>
+          <span className="dropzone-hint">{hint}</span>
+        </span>
+      </label>
+      {image && (
+        <button type="button" className="btn-link btn-link-danger" onClick={onRemove} disabled={disabled}>Remove {label.toLowerCase()}</button>
+      )}
+    </div>
+  );
+}
+
 export default function Settings() {
   const { refresh, signOutEverywhere } = useAuth();
   const [form, setForm] = useState(null);
   const [saved, setSaved] = useState(null);
   const [password, setPassword] = useState("");
   const [logo, setLogo] = useState(null);
+  const [brandLogo, setBrandLogo] = useState(null);
   const [activity, setActivity] = useState(null);
-  const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -37,6 +74,7 @@ export default function Settings() {
     setForm(fields);
     setSaved(fields);
     setLogo(profile.logo);
+    setBrandLogo(profile.brand_logo);
   }
 
   const bankChanged = Boolean(form && saved && BANK_FIELDS.some((name) => form[name] !== saved[name]));
@@ -79,6 +117,13 @@ export default function Settings() {
 
   const removeLogo = () => run("logo", async () => setLogo((await api.removeLogo()).logo), "Logo removed.");
 
+  function uploadBrandLogo(file) {
+    if (file) run("brand", async () => setBrandLogo((await api.uploadBrandLogo(file)).brand_logo), "Manufacturer's logo updated.");
+  }
+
+  const removeBrandLogo = () =>
+    run("brand", async () => setBrandLogo((await api.removeBrandLogo()).brand_logo), "Manufacturer's logo removed.");
+
   if (!form) {
     return <div className="page">{error ? <div className="alert alert-error">{error}</div> : <p className="muted">Loading…</p>}</div>;
   }
@@ -117,36 +162,12 @@ export default function Settings() {
           </Field>
         </div>
 
-        <div className="logo-field">
-          <span className="field-label">Logo</span>
-          <label className={dragging ? "dropzone dragging" : "dropzone"}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragging(false);
-              uploadLogo(event.dataTransfer.files[0]);
-            }}>
-            <input type="file" accept="image/*" hidden disabled={!!busy}
-              onChange={(event) => {
-                uploadLogo(event.target.files[0]);
-                event.target.value = "";
-              }} />
-            <span className="dropzone-thumb">{logo && <img src={logo} alt="Business logo" />}</span>
-            <span>
-              <span className="dropzone-title">
-                {busy === "logo" ? "Uploading…" : logo ? "Tap to replace, or drop a file" : "Tap to upload, or drop a file"}
-              </span>
-              <span className="dropzone-hint">PNG or JPG, up to 2 MB. Shown at the top of your quotes.</span>
-            </span>
-          </label>
-          {logo && (
-            <button type="button" className="btn-link btn-link-danger" onClick={removeLogo} disabled={!!busy}>Remove logo</button>
-          )}
-        </div>
+        <LogoField label="Logo" image={logo} busy={busy === "logo"} disabled={!!busy}
+          hint="PNG or JPG, up to 2 MB. Shown at the top of your quotes."
+          onUpload={uploadLogo} onRemove={removeLogo} />
+        <LogoField label="Manufacturer's logo" image={brandLogo} busy={busy === "brand"} disabled={!!busy}
+          hint="The brand you distribute, e.g. Coleman. Printed beside your logo on quotes and waybills."
+          onUpload={uploadBrandLogo} onRemove={removeBrandLogo} />
       </section>
 
       <section className="panel">

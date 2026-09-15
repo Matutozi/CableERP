@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import DocumentTabs from "../components/DocumentTabs.jsx";
 import QuoteTable from "../components/QuoteTable.jsx";
 import { api } from "../services/api.js";
 
@@ -55,6 +56,7 @@ export default function QuoteList() {
         </div>
         <Link className="btn btn-primary" to="/quotes/new">New quote</Link>
       </div>
+      <DocumentTabs />
 
       {error && <div className="alert alert-error">{error}</div>}
 

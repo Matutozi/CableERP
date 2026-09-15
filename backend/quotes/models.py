@@ -5,6 +5,7 @@ from django.db import models
 from django.utils import timezone
 
 from accounts.models import BusinessProfile
+from accounts.numbering import next_reference_number
 from catalogue.models import (
     COST_DECIMAL_PLACES,
     MAX_PRICE,
@@ -74,12 +75,7 @@ class Quote(models.Model):
     @classmethod
     def next_reference_number(cls, business, date):
         """QT-YYYYMMDD-NNN, numbered per business per day. Callers should hold a lock on the business row."""
-        prefix = f"QT-{date:%Y%m%d}-"
-        existing = cls.objects.filter(business=business, reference_number__startswith=prefix).values_list(
-            "reference_number", flat=True
-        )
-        last = max((int(ref.removeprefix(prefix)) for ref in existing), default=0)
-        return f"{prefix}{last + 1:03d}"
+        return next_reference_number(cls.objects.filter(business=business), "QT", date)
 
     @property
     def is_locked(self):

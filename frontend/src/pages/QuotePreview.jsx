@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import Icon from "../components/Icon.jsx";
 import { api } from "../services/api.js";
 import { formatDate, formatNaira, formatQty, toNumber, unitLabel } from "../services/format.js";
@@ -15,6 +15,7 @@ function shareMessage(quote, business) {
 /** An on-screen copy of the PDF, with the ways to send it. */
 export default function QuotePreview() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [quote, setQuote] = useState(null);
   const [business, setBusiness] = useState(null);
   const [busy, setBusy] = useState("");
@@ -47,6 +48,13 @@ export default function QuotePreview() {
     run("download", async () => {
       await downloadQuotePdf(quote);
       setNotice(`Downloaded ${quote.reference_number}.pdf.`);
+    });
+
+  // A waybill copies the quote's lines as they stand, so it is made from this saved version.
+  const handleWaybill = () =>
+    run("waybill", async () => {
+      const waybill = await api.createWaybill(quote.id);
+      navigate(`/quotes/waybills/${waybill.id}`);
     });
 
   function handleWhatsApp() {
@@ -93,6 +101,9 @@ export default function QuotePreview() {
       <div className="preview-toolbar">
         <Link to={`/quotes/${quote.id}`} className="back-link"><Icon name="back" size={14} strokeWidth={1.6} />Back to quote</Link>
         <div className="toolbar-actions">
+          <button type="button" className="btn btn-secondary" onClick={handleWaybill} disabled={!!busy}>
+            {busy === "waybill" ? "Creating…" : "Create waybill"}
+          </button>
           <button type="button" className="btn btn-secondary" onClick={handleDownload} disabled={!!busy}>
             {busy === "download" ? "Preparing…" : "Download"}
           </button>
@@ -119,6 +130,7 @@ export default function QuotePreview() {
             </div>
           </div>
           <div className="doc-title">
+            {business.brand_logo && <img src={business.brand_logo} alt="" className="doc-brand-logo" />}
             <div className="doc-title-word">QUOTATION</div>
             <div className="doc-small num">{quote.reference_number}<br />{formatDate(quote.date)}</div>
           </div>
