@@ -40,8 +40,12 @@ try {
 
   await page.goto(`${BASE}/quotes/new`);
   await page.getByPlaceholder("Customer name").fill("Smoke test customer");
-  await page.getByPlaceholder("Type or pick a cable").first().fill("Singles");
-  await page.getByPlaceholder("e.g. 2.5mm").first().fill("1.5mm");
+  // Find the pickers by their accessible names, not placeholder text: the placeholders were
+  // reworded when these became dropdowns, and that silently broke this test.
+  await page.getByRole("combobox", { name: "Cable type" }).first().fill("Singles");
+  await page.keyboard.press("Escape"); // close the list so it can't cover the next field on a phone
+  await page.getByRole("combobox", { name: "Size" }).first().fill("1.5mm");
+  await page.keyboard.press("Escape");
   await page.getByLabel("Red quantity").fill("30");
 
   // The price comes from the catalogue, so work the expectation out from what the screen shows.
