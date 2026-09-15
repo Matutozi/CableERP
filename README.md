@@ -1,6 +1,6 @@
 # CableERP
 
-A vertical ERP for cable distributors and sellers in Nigeria. **Phase 1 is the quote builder**: a seller sets up their business details and catalogue (cables and accessories) once, then builds a quotation on their phone in a minute and sends it to the customer as a PDF (WhatsApp, email, …).
+A vertical ERP for cable distributors and sellers in Nigeria. **Phase 1 is the quote builder**: a seller sets up their business details and catalogue (cables and accessories) once, then builds a quotation on their phone in a minute and sends it to the customer as a PDF (WhatsApp, email, …). **Phase 2 adds cost and margin**: record what a delivery cost and every quote shows what it is worth making.
 
 It is multi-tenant from the start — any cable seller can register, and every catalogue entry and quote is scoped to the signed-in business.
 
@@ -85,7 +85,7 @@ On the same Wi-Fi, start Vite with `npm run dev -- --host`, add your computer's 
 
 ```bash
 cd backend
-python manage.py test          # 45 tests
+python manage.py test          # 92 tests
 ```
 
 There is also a browser smoke test — sign in, build a quote, check the totals, download the PDF. It needs a seeded stack running on http://localhost:5173:
@@ -104,12 +104,14 @@ The tests run on PostgreSQL by default; to run them without it, use `DATABASE_UR
 backend/
   config/      settings (env-driven), root URLs
   accounts/    auth endpoints, BusinessProfile, seed_data command
-  catalogue/   CableType, CableSize, Accessory
+  catalogue/   CableType, CableSize, Accessory, PriceChange (selling-price history)
   quotes/      Quote, QuoteLineItem, QuoteLineItemColour, PDF rendering (pdf.py + templates/quotes/quote_pdf.html)
+  purchasing/  Purchase, PurchaseItem, costing.py (landed cost, unit conversion, moving average)
 frontend/src/
-  pages/       Login, Register, Dashboard, QuoteList, QuoteEditor, QuotePreview, Catalogue (cables), Accessories, Settings
+  pages/       Login, Register, Dashboard, QuoteList, QuoteEditor, QuotePreview,
+               Catalogue (cables), Accessories, Purchases, Settings
   components/  Layout (sidebar / mobile header, drawer, bottom tabs), LineItemCard, QuoteTable, CatalogueHeader,
-               MoneyInput, InlinePrice, Field, Icon
+               MoneyInput, InlinePrice, CostNote, PriceTrend, TrendPanel, Sparkline, Combobox, Field, Icon
   services/    api.js (fetch + CSRF), format.js (money, units), quoteMath.js (catalogue matching, running totals), pdf.js
 ```
 
@@ -117,7 +119,10 @@ frontend/src/
 
 - **Quote builder** — items are edited in place on cards. Type or pick a cable type and size (the price fills in from the catalogue and stays editable); cables with colour variants take a quantity per colour. **Add accessory** adds a card for a non-cable product. Anything not in the catalogue is quoted exactly as typed. A sticky bar keeps subtotal, VAT, transport and the grand total in view. **Generate PDF** saves and opens the preview.
 - **Quote preview** — an on-screen copy of the PDF with **Download** and **Send on WhatsApp**.
-- **Catalogue** — two tabs: **Cables** (types → sizes, prices edited in place) and **Accessories** (name, unit, price, all edited in place).
+- **Catalogue** — three tabs: **Cables** (types → sizes, prices edited in place), **Accessories** (name, unit, price, all edited in place) and **Purchases**. Every catalogue row shows what it last cost and the margin the current price leaves, or says plainly that no purchase has been recorded.
+- **Purchases** — record a delivery: supplier, date, what arrived and what was paid, plus transport and clearing for the load. Stock bought by the coil and sold by the metre is converted once and remembered. Tap a recorded delivery to see what was in it, correct it, or delete it — costs are recalculated either way.
+- **Price trend** — tap any catalogue item's cost line to chart what you have charged against what you have paid, over time, with the last few changes listed underneath. Rising cost is shown in red, falling in green: on the cost line, up is the bad direction.
+- **Dashboard** — recent quotes, and **Price movements**: the six items restocked most recently, each with a sparkline of its cost and the move since the first purchase. Tapping one opens the full trend in place. It comes from a single request rather than one per item, because a seller opening the app on mobile data pays for every round trip.
 
 ### API
 
@@ -125,8 +130,10 @@ frontend/src/
 |---|---|
 | Auth | `POST /api/auth/login/`, `POST /api/auth/register/`, `POST /api/auth/logout/`, `GET /api/auth/me/` |
 | Profile | `GET/PUT /api/profile/`, `POST/DELETE /api/profile/logo/`, `GET /api/activity/` |
-| Cables | `GET/POST /api/cable-types/`, `GET/PUT/PATCH/DELETE /api/cable-types/{id}/`, `GET/POST /api/cable-types/{id}/sizes/`, `GET/PUT/PATCH/DELETE /api/sizes/{id}/` |
-| Accessories | `GET/POST /api/accessories/`, `GET/PUT/PATCH/DELETE /api/accessories/{id}/` |
+| Cables | `GET/POST /api/cable-types/`, `GET/PUT/PATCH/DELETE /api/cable-types/{id}/`, `GET/POST /api/cable-types/{id}/sizes/`, `GET/PUT/PATCH/DELETE /api/sizes/{id}/`, `GET /api/sizes/{id}/history/` |
+| Accessories | `GET/POST /api/accessories/`, `GET/PUT/PATCH/DELETE /api/accessories/{id}/`, `GET /api/accessories/{id}/history/` |
+| Trends | `GET /api/price-movements/` (the six items restocked most recently, with their series) |
+| Purchases | `GET/POST /api/purchases/`, `GET/PUT/PATCH/DELETE /api/purchases/{id}/` |
 | Quotes | `GET/POST /api/quotes/`, `GET/PUT/PATCH/DELETE /api/quotes/{id}/`, `POST /api/quotes/{id}/revise/`, `GET /api/quotes/{id}/pdf/` (`?inline=1` to view instead of download) |
 
 Unauthenticated requests get `401`; requests for another business's data get `404`.
@@ -140,11 +147,21 @@ Unauthenticated requests get `401`; requests for another business's data get `40
 - **Totals are computed, not stored.** Line amounts are rounded to kobo (half-up) before summing, so the subtotal always equals the sum of the printed amounts. The frontend shows a running total while editing; the server's figures are what go on the PDF.
 - **Reference numbers** are `QT-YYYYMMDD-NNN`, numbered per business per day (unique per business, not globally, so two sellers can both have `QT-20260911-001`). The date part is the quote date. The business row is locked while numbering so concurrent saves can't collide, and numbers continue past deleted quotes rather than reusing the latest.
 - **Payment details are frozen onto each quote** when it is written, so editing the business profile later can never change the account an issued quote tells a customer to pay into. Changing bank details asks for the account password again and is logged. The disclaimer, payment terms and validity still come from the current profile.
-- **Amounts are bounded**: ₦1bn per unit price and 100,000 per line quantity, so a number too large for the totals can never be saved.
+- **Price history is stored, not reconstructed.** `PriceChange` records the selling price whenever it is set or changed, so the trend is real data rather than something parsed back out of the audit log's prose. Existing items were given one opening point when the table was added, timestamped then — we know today's price, not when it was set. The cost series comes from the purchase ledger, which already carries dates.
+- **Cost comes from a ledger, not a field.** Each delivery is a `Purchase` with its items; the `last_unit_cost` and `average_unit_cost` on a catalogue row are a cache of what that ledger says, so the quote builder can read a cost without aggregating it on every keystroke. The cache is always rebuildable with `python manage.py rebuild_costs`.
+- **Two costs, for two questions.** `last_unit_cost` is what a refill costs today — the figure to price against while the naira moves — and is what quotes are measured on. `average_unit_cost` is the quantity-weighted average of everything bought so far, kept for reporting profit in Phase 4. Once Phase 5 tracks stock on hand, the average should narrow to goods still unsold.
+- **Cost is normalised to the sale unit** and carries four decimal places, because it is derived rather than charged: a coil bought at ₦76,500 and sold by the metre costs ₦765 a metre, and a box of 12 at ₦5,000 costs ₦416.6667 each.
+- **Transport is allocated by line value**, so a ₦300,000 coil carries more of the lorry than a ₦2,000 roll of tape. Leaving it out would overstate every margin by the same silent percentage.
+- **Margin is snapshotted with the quote.** `QuoteLineItem.unit_cost` is frozen on every save while the quote is a draft and for the last time as it is marked sent, so restocking next month cannot rewrite the margin on a quote the customer already has. A revision is costed at today's price, not the original's.
+- **An unknown cost stays unknown.** Items with no purchase recorded have a null cost and no margin, and the quote reports how many of its lines the margin figure actually speaks for. Treating a missing cost as zero would show 100% margin on everything nobody has costed yet.
+- **Cost never reaches the customer.** It is absent from the PDF template and the quote preview, and a test renders a quote's PDF and asserts the cost does not appear in the bytes. The cost fields are listed in one constant per serializer so Phase 6 can hide them from staff who aren't the owner in a single edit.
+- **Amounts are bounded**: ₦1bn per unit price and 100,000 per line quantity, so a number too large for the totals can never be saved. Landed cost is *derived* rather than entered, so the delivery's arithmetic is run before anything is written and a line that works out to an impossible cost per unit is refused by name — a mistyped conversion factor is wrong by 100×, not by a little.
+- **A sale unit cannot change once costs exist.** Recorded costs are held per sale unit, and nothing in the ledger says how many metres are in a coil bought as a coil — so switching a type from coils to metres is refused rather than silently leaving every cost describing a different thing. Add a separate catalogue entry instead.
+- **Dates cannot be in the future.** A delivery dated next year would otherwise win "most recent" forever and silently become the cost every quote is priced against; the same check applies to quote dates, which drive reference numbers.
 - **Sign-in, sign-up and PDF rendering are rate limited** (10/min, 20/hour and 60/hour). Throttle counters live in Django's cache, so give the deployment a shared cache such as Redis once it runs more than one worker.
 - **A quote holds up to 200 items**, and its PDF is rendered once per version of the quote and of the business profile — repeat downloads come from the cache.
 - **Sent quotes are read-only.** Marking a quote as sent records `sent_at` and locks it; `POST /api/quotes/{id}/revise/` copies it into a fresh draft that links back through `revision_of`, so what the customer received stays on record.
-- **Changes are recorded.** Price changes, bank-detail changes and quote events (created, edited, sent, revised, deleted) are written to a per-business history, shown under Settings → Recent activity and served by `GET /api/activity/`. Each entry keeps the user who made it, ready for per-person logins in Phase 6.
+- **Changes are recorded.** Price changes, bank-detail changes, purchases and quote events (created, edited, sent, revised, deleted) are written to a per-business history, shown under Settings → Recent activity and served by `GET /api/activity/`. Each entry keeps the user who made it, ready for per-person logins in Phase 6.
 - **Quote lists are paged and searched on the server** (`?search=`, `?page=`, `?page_size=`), so a long history stays fast.
 - **Sessions end with the browser** unless "Keep me signed in" is ticked, and **Settings → Security** signs out every device at once.
 - **Inter is self-hosted** from `frontend/public/fonts`, so the app contacts no third party at run time and still works on a weak connection.

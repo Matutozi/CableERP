@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from unittest.mock import patch
@@ -5,6 +6,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.template.loader import render_to_string
+from django.utils import timezone
 from django.test import SimpleTestCase
 from rest_framework.test import APITestCase
 
@@ -342,3 +344,132 @@ class FormatFilterTests(SimpleTestCase):
         self.assertEqual(quantity(Decimal("1200"), ""), "1,200")
         self.assertEqual(percent(Decimal("7.50")), "7.5%")
         self.assertEqual(percent(Decimal("10.00")), "10%")
+
+
+class QuoteDateTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user, self.business = make_business("ada")
+        self.client.force_authenticate(self.user)
+
+    def post(self, date):
+        return self.client.post("/api/quotes/", {
+            "customer_name": "Dangote", "staff_name": "Ada", "date": date.isoformat(),
+            "line_items": [plain_line("1.5mm", "33000", 2)],
+        }, format="json")
+
+    def test_a_quote_cannot_be_dated_in_the_future(self):
+        """The date drives the reference number, so a future one misfiles the quote as well."""
+        response = self.post(timezone.localdate() + timedelta(days=1))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("future", str(response.data))
+
+    def test_today_and_the_past_are_fine(self):
+        self.assertEqual(self.post(timezone.localdate()).status_code, 201)
+        self.assertEqual(self.post(timezone.localdate() - timedelta(days=7)).status_code, 201)
+
+
+class QuoteMarginTests(APITestCase):
+    """Cost is snapshotted onto a quote, frozen when it is sent, and never shown to a customer."""
+
+    def setUp(self):
+        cache.clear()
+        self.user, self.business = make_business("ada")
+        self.client.force_authenticate(self.user)
+        cable_type = CableType.objects.create(business=self.business, name="Flex", unit="coil")
+        self.size = CableSize.objects.create(cable_type=cable_type, size_label="2.5mm", default_price="90000")
+        self.restock("72000")
+
+    def restock(self, unit_cost, days_ago=30):
+        response = self.client.post(
+            "/api/purchases/",
+            {
+                "date": (timezone.localdate() - timedelta(days=days_ago)).isoformat(),
+                "items": [{"cable_size": self.size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": unit_cost}],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+
+    def create_quote(self, lines=None):
+        lines = lines or [{
+            "cable_type_name": "Flex", "size_label": "2.5mm", "unit": "coil", "unit_price": "90000",
+            "cable_size": self.size.pk, "colours": [{"colour": "", "quantity": 2}],
+        }]
+        response = self.client.post(
+            "/api/quotes/",
+            {"customer_name": "Dangote", "staff_name": "Ada", "vat_percentage": "0", "line_items": lines},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        return response.data
+
+    def test_margin_is_computed_from_the_catalogue_cost(self):
+        quote = self.create_quote()
+        self.assertEqual(quote["line_items"][0]["unit_cost"], "72000.0000")
+        self.assertEqual(quote["total_cost"], "144000.00")
+        self.assertEqual(quote["total_margin"], "36000.00")
+        self.assertEqual(quote["margin_percentage"], "20.00")
+
+    def test_a_sent_quote_keeps_the_margin_it_was_written_with(self):
+        quote = self.create_quote()
+        sent = self.client.patch(f"/api/quotes/{quote['id']}/", {"status": "sent"}, format="json")
+        self.assertEqual(sent.status_code, 200)
+        self.assertEqual(sent.data["total_margin"], "36000.00")
+
+        # Prices rise. The sent quote must not move.
+        self.restock("85000", days_ago=0)
+        again = self.client.get(f"/api/quotes/{quote['id']}/").data
+        self.assertEqual(again["line_items"][0]["unit_cost"], "72000.0000")
+        self.assertEqual(again["total_margin"], "36000.00")
+
+    def test_a_draft_is_recosted_on_every_save(self):
+        quote = self.create_quote()
+        self.restock("85000", days_ago=0)
+        updated = self.client.patch(f"/api/quotes/{quote['id']}/", {"notes": "revised pricing"}, format="json")
+        self.assertEqual(updated.data["line_items"][0]["unit_cost"], "85000.0000")
+
+    def test_a_revision_is_costed_at_todays_price(self):
+        quote = self.create_quote()
+        self.client.patch(f"/api/quotes/{quote['id']}/", {"status": "sent"}, format="json")
+        self.restock("85000", days_ago=0)
+        revision = self.client.post(f"/api/quotes/{quote['id']}/revise/", format="json")
+        self.assertEqual(revision.status_code, 201)
+        self.assertEqual(revision.data["line_items"][0]["unit_cost"], "85000.0000")
+
+    def test_an_uncosted_line_is_unknown_not_free(self):
+        quote = self.create_quote([
+            {"cable_type_name": "Flex", "size_label": "2.5mm", "unit": "coil", "unit_price": "90000",
+             "cable_size": self.size.pk, "colours": [{"colour": "", "quantity": 1}]},
+            accessory_line(name="Insulation tape", price="500", qty=4),
+        ])
+        line = quote["line_items"][1]
+        self.assertIsNone(line["unit_cost"])
+        self.assertIsNone(line["margin_amount"])
+        # Margin speaks only for the costed line: ₦90,000 revenue, not ₦92,000.
+        self.assertEqual(quote["costed_subtotal"], "90000.00")
+        self.assertEqual(quote["total_margin"], "18000.00")
+        self.assertEqual(quote["margin_coverage"]["costed_items"], 1)
+        self.assertEqual(quote["margin_coverage"]["total_items"], 2)
+        self.assertEqual(Decimal(str(quote["margin_coverage"]["value_share"])).quantize(Decimal("0.01")),
+                         Decimal("97.83"))
+
+    def test_a_quote_with_no_costs_at_all_reports_nothing_rather_than_zero(self):
+        quote = self.create_quote([accessory_line(name="Insulation tape", price="500", qty=4)])
+        self.assertIsNone(quote["total_cost"])
+        self.assertIsNone(quote["total_margin"])
+        self.assertIsNone(quote["margin_percentage"])
+
+    def test_cost_never_reaches_the_customer_pdf(self):
+        """The one leak that would matter: a customer must never see what the stock cost."""
+        quote_data = self.create_quote()
+        quote = Quote.objects.get(pk=quote_data["id"])
+        html = render_to_string(
+            "quotes/quote_pdf.html", {"quote": quote, "business": self.business, "logo_uri": None}
+        )
+        for figure in ("72000", "72,000", "144,000", "36,000", "18000"):
+            self.assertNotIn(figure, html, f"{figure} is cost data and must not appear on a customer's quote")
+
+        response = self.client.get(f"/api/quotes/{quote.pk}/pdf/")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"72,000", response.content)

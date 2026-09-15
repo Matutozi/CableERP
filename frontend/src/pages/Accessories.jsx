@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import CatalogueHeader from "../components/CatalogueHeader.jsx";
+import CostNote from "../components/CostNote.jsx";
 import Field from "../components/Field.jsx";
 import Icon from "../components/Icon.jsx";
 import InlinePrice from "../components/InlinePrice.jsx";
 import MoneyInput from "../components/MoneyInput.jsx";
+import TrendPanel from "../components/TrendPanel.jsx";
 import { api } from "../services/api.js";
-import { ACCESSORY_UNITS, toNumber } from "../services/format.js";
+import { ACCESSORY_UNITS, toNumber, unitLabel } from "../services/format.js";
 
 /** Stays open after each add so a batch of accessories can be entered in one go. */
 function AccessoryForm({ onAdded, onClose }) {
@@ -66,6 +68,7 @@ function AccessoryForm({ onAdded, onClose }) {
 
 function AccessoryRow({ accessory, onSave, onDelete }) {
   const [name, setName] = useState(accessory.name);
+  const [showTrend, setShowTrend] = useState(false);
 
   useEffect(() => setName(accessory.name), [accessory.name]);
 
@@ -95,6 +98,11 @@ function AccessoryRow({ accessory, onSave, onDelete }) {
       <button type="button" className="icon-btn icon-btn-danger" aria-label={`Delete ${accessory.name}`} onClick={onDelete}>
         <Icon name="trash" size={14} />
       </button>
+      <button type="button" className="cost-toggle" aria-expanded={showTrend}
+        title="Show how this price and its cost have moved" onClick={() => setShowTrend(!showTrend)}>
+        <CostNote row={accessory} unit={unitLabel(accessory.unit, 1)} />
+      </button>
+      {showTrend && <TrendPanel kind="accessory" id={accessory.id} unit={accessory.unit} />}
     </div>
   );
 }

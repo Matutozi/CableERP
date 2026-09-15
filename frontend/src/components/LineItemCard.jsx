@@ -2,8 +2,10 @@ import {
   ACCESSORY_UNITS,
   CABLE_UNITS,
   formatNaira,
+  formatPercent,
   formatQty,
   isFractionalUnit,
+  round2,
   toNumber,
   unitLabel,
 } from "../services/format.js";
@@ -47,7 +49,7 @@ const onlyAmount = (text) => text.replace(/[^\d.]/g, "");
  * One editable quote line, per the prototype's "cards" layout: type or pick a cable (then size) or an
  * accessory from the catalogue; anything not in the catalogue is quoted exactly as typed.
  */
-export default function LineItemCard({ item, cableTypes, accessories, error, autoFocus, adding, onChange, onRemove, onAddToCatalogue }) {
+export default function LineItemCard({ item, cableTypes, accessories, unitCost, error, autoFocus, adding, onChange, onRemove, onAddToCatalogue }) {
   const isCable = item.kind === "cable";
   const cableType = isCable ? findCableType(cableTypes, item.cable_type_name) : null;
   const accessory = isCable ? null : findAccessory(accessories, item.item_name);
@@ -62,6 +64,8 @@ export default function LineItemCard({ item, cableTypes, accessories, error, aut
   const labels = shortNames(colourNames);
   const { quantity, amount } = lineTotals({ unit_price: item.unit_price, colours: coloursFor(item, cableType) });
   const qtyMode = isFractionalUnit(item.unit) ? "decimal" : "numeric";
+  // Margin only when a purchase has been recorded for this item: an unknown cost stays unknown.
+  const margin = unitCost === null || unitCost === undefined ? null : round2(amount - quantity * toNumber(unitCost));
 
   const setQuantity = (colour) => (event) =>
     onChange({ quantities: { ...item.quantities, [colour]: onlyAmount(event.target.value) } });
@@ -203,6 +207,12 @@ export default function LineItemCard({ item, cableTypes, accessories, error, aut
         </button>
         <div className="item-sum">
           <span className="item-qty">{formatQty(quantity)} {unitLabel(item.unit, quantity)}</span>
+          {margin !== null && amount > 0 && (
+            <span className={margin < 0 ? "item-margin loss" : "item-margin"}
+              title={`Costs ₦${formatNaira(quantity * toNumber(unitCost))} at your last purchase price`}>
+              {margin < 0 ? "−" : "+"}₦{formatNaira(Math.abs(margin))} · {formatPercent((margin / amount) * 100)}
+            </span>
+          )}
           <span className="item-total">₦{formatNaira(amount)}</span>
         </div>
       </div>

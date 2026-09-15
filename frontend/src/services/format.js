@@ -22,6 +22,8 @@ export const ACCESSORY_UNITS = [
   ["set", "Set"],
   ["metre", "Metre"],
 ];
+// Every unit stock can arrive in: cables are bought by the coil or metre, accessories by the box, pack, roll…
+export const ALL_UNITS = [...CABLE_UNITS, ...ACCESSORY_UNITS.filter(([unit]) => !CABLE_UNITS.some(([c]) => c === unit))];
 export const isFractionalUnit = (unit) => unit === "metre";
 
 export function toNumber(value) {
@@ -33,6 +35,19 @@ export const round2 = (value) => Math.round((value + Number.EPSILON) * 100) / 10
 
 /** 2277000 -> "2,277,000.00" (no currency sign; callers add ₦ where it reads better). */
 export const formatNaira = (value) => nairaFormat.format(toNumber(value));
+
+/**
+ * Cost comes back with four decimal places because it is derived from purchases, not charged.
+ * Money on screen still reads in kobo, so round for display only — never for arithmetic.
+ */
+export const formatCost = (value) => nairaFormat.format(toNumber(value));
+
+/** "20.00" -> "20%", "18.75" -> "18.8%". Margins are read at a glance, so one decimal is plenty. */
+export function formatPercent(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  const number = toNumber(value);
+  return `${plainFormat.format(Math.round(number * 10) / 10)}%`;
+}
 
 /** "30.00" -> "30", "12.50" -> "12.5". */
 export const formatQty = (value) => plainFormat.format(toNumber(value));

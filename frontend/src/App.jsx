@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard.jsx";
 import Login from "./pages/Login.jsx";
 import QuoteEditor from "./pages/QuoteEditor.jsx";
 import QuoteList from "./pages/QuoteList.jsx";
+import Purchases from "./pages/Purchases.jsx";
 import QuotePreview from "./pages/QuotePreview.jsx";
 import Register from "./pages/Register.jsx";
 import Settings from "./pages/Settings.jsx";
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="quotes/:id/preview" element={<QuotePreview />} />
         <Route path="catalogue" element={<Catalogue />} />
         <Route path="catalogue/accessories" element={<Accessories />} />
+        <Route path="catalogue/purchases" element={<Purchases />} />
         <Route path="settings" element={<Settings />} />
         <Route path="business" element={<Navigate to="/settings" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />

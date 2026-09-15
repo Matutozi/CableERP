@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import CatalogueHeader from "../components/CatalogueHeader.jsx";
+import CostNote from "../components/CostNote.jsx";
 import Field from "../components/Field.jsx";
 import Icon from "../components/Icon.jsx";
 import InlinePrice from "../components/InlinePrice.jsx";
 import MoneyInput from "../components/MoneyInput.jsx";
+import TrendPanel from "../components/TrendPanel.jsx";
 import { api } from "../services/api.js";
 import { CABLE_UNITS, formatNaira, toNumber, unitLabel } from "../services/format.js";
 
@@ -104,6 +106,7 @@ function AddSizeForm({ cableType, onAdded, onClose }) {
 function CableTypeCard({ cableType, open, onToggle, onChange, onDelete }) {
   const [editing, setEditing] = useState(false);
   const [addingSize, setAddingSize] = useState(false);
+  const [trendFor, setTrendFor] = useState(null);
   const [error, setError] = useState("");
 
   const updateSizes = (update) => onChange((current) => ({ ...current, sizes: update(current.sizes) }));
@@ -168,15 +171,23 @@ function CableTypeCard({ cableType, open, onToggle, onChange, onDelete }) {
             <div className="chips">{cableType.colour_options.map((colour) => <span key={colour} className="chip">{colour}</span>)}</div>
           )}
           {cableType.sizes.map((size) => (
-            <div key={size.id} className="list-row">
-              <span className="list-row-name">{size.size_label}</span>
-              <span className="list-row-actions">
-                <InlinePrice price={size.default_price} label={`Price for ${size.size_label}`} onSave={(price) => savePrice(size, price)} />
-                <button type="button" className="icon-btn icon-btn-danger" aria-label={`Delete ${size.size_label}`} onClick={() => deleteSize(size)}>
-                  <Icon name="trash" size={14} />
+            <Fragment key={size.id}>
+              <div className="list-row">
+                <button type="button" className="list-row-name cost-toggle" aria-expanded={trendFor === size.id}
+                  title="Show how this price and its cost have moved"
+                  onClick={() => setTrendFor(trendFor === size.id ? null : size.id)}>
+                  <span className="cost-toggle-name">{size.size_label}</span>
+                  <CostNote row={size} unit={unitLabel(cableType.unit, 1)} />
                 </button>
-              </span>
-            </div>
+                <span className="list-row-actions">
+                  <InlinePrice price={size.default_price} label={`Price for ${size.size_label}`} onSave={(price) => savePrice(size, price)} />
+                  <button type="button" className="icon-btn icon-btn-danger" aria-label={`Delete ${size.size_label}`} onClick={() => deleteSize(size)}>
+                    <Icon name="trash" size={14} />
+                  </button>
+                </span>
+              </div>
+              {trendFor === size.id && <TrendPanel kind="size" id={size.id} unit={cableType.unit} />}
+            </Fragment>
           ))}
           {cableType.sizes.length === 0 && !addingSize && <p className="list-empty">No sizes yet.</p>}
           {addingSize ? (

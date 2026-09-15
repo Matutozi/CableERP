@@ -55,6 +55,8 @@ class AuditLog(models.Model):
         QUOTE_SENT = "quote_sent", "Quote sent"
         QUOTE_REVISED = "quote_revised", "Quote revised"
         QUOTE_DELETED = "quote_deleted", "Quote deleted"
+        PURCHASE_RECORDED = "purchase_recorded", "Purchase recorded"
+        PURCHASE_DELETED = "purchase_deleted", "Purchase deleted"
 
     business = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name="audit_log")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+")

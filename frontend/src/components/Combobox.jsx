@@ -5,7 +5,7 @@ import Icon from "./Icon.jsx";
  * A picker that opens its full list on tap and still accepts anything typed — the catalogue is a
  * starting point, not a limit. Used for cable types, sizes and accessories on a quote line.
  */
-export default function Combobox({ value, options, placeholder, ariaLabel, autoFocus, onChange }) {
+export default function Combobox({ value, options, placeholder, ariaLabel, autoFocus, emptyMessage, onChange }) {
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(-1);
   const wrapper = useRef(null);
@@ -106,7 +106,9 @@ export default function Combobox({ value, options, placeholder, ariaLabel, autoF
             </li>
           ))}
           {visible.length === 0 && (
-            <li className="combobox-empty">Not in your catalogue — it will be quoted exactly as typed.</li>
+            <li className="combobox-empty">
+              {emptyMessage ?? "Not in your catalogue — it will be quoted exactly as typed."}
+            </li>
           )}
         </ul>
       )}

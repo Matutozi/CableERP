@@ -84,17 +84,30 @@ export const api = {
   listActivity: () => get("/activity/"),
 
   listCableTypes: () => get("/cable-types/"),
+  priceMovements: () => get("/price-movements/"),
   createCableType: (data) => post("/cable-types/", data),
   updateCableType: (id, data) => put(`/cable-types/${id}/`, data),
   deleteCableType: (id) => del(`/cable-types/${id}/`),
   createSize: (cableTypeId, data) => post(`/cable-types/${cableTypeId}/sizes/`, data),
   updateSize: (id, data) => put(`/sizes/${id}/`, data),
+  sizeHistory: (id) => get(`/sizes/${id}/history/`),
   deleteSize: (id) => del(`/sizes/${id}/`),
 
   listAccessories: () => get("/accessories/"),
   createAccessory: (data) => post("/accessories/", data),
   updateAccessory: (id, data) => put(`/accessories/${id}/`, data),
+  accessoryHistory: (id) => get(`/accessories/${id}/history/`),
   deleteAccessory: (id) => del(`/accessories/${id}/`),
+
+  listPurchases: ({ page = 1, pageSize } = {}) => {
+    const params = new URLSearchParams({ page: String(page) });
+    if (pageSize) params.set("page_size", String(pageSize));
+    return get(`/purchases/?${params}`);
+  },
+  getPurchase: (id) => get(`/purchases/${id}/`),
+  createPurchase: (data) => post("/purchases/", data),
+  updatePurchase: (id, data) => put(`/purchases/${id}/`, data),
+  deletePurchase: (id) => del(`/purchases/${id}/`),
 
   listQuotes: ({ search = "", page = 1, pageSize } = {}) => {
     const params = new URLSearchParams({ page: String(page) });

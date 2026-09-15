@@ -51,3 +51,36 @@ export function quoteTotals(items, vatPercentage, transportCost) {
   const transport = toNumber(transportCost);
   return { subtotal, vat, transport, grandTotal: round2(subtotal + vat + transport) };
 }
+
+/**
+ * What this line's stock cost, per unit, from the catalogue — or null if no purchase has ever
+ * been recorded for it. The server re-reads this and freezes it onto the quote when it saves;
+ * this copy only keeps the running figures honest while the seller is still typing.
+ */
+export function unitCostFor(item, cableType, accessories) {
+  const row = item.kind === "cable" ? findSize(cableType, item.size_label) : findAccessory(accessories, item.item_name);
+  return row?.last_unit_cost ?? null;
+}
+
+/**
+ * Margin across a quote, counting only the lines whose cost is known and saying how much of
+ * the quote that covers. An unknown cost is never treated as zero: that would report a 100%
+ * margin on everything nobody has costed yet, which is worse than reporting nothing.
+ */
+export function marginTotals(items, subtotal) {
+  const costed = items.filter((item) => item.unitCost !== null && item.unitCost !== undefined);
+  if (!costed.length) {
+    return { known: false, cost: 0, margin: 0, percentage: null, costedItems: 0, totalItems: items.length, valueShare: 0 };
+  }
+  const revenue = round2(costed.reduce((sum, item) => sum + lineTotals(item).amount, 0));
+  const cost = round2(costed.reduce((sum, item) => sum + lineTotals(item).quantity * toNumber(item.unitCost), 0));
+  return {
+    known: true,
+    cost,
+    margin: round2(revenue - cost),
+    percentage: revenue > 0 ? round2(((revenue - cost) / revenue) * 100) : null,
+    costedItems: costed.length,
+    totalItems: items.length,
+    valueShare: subtotal > 0 ? round2((revenue / subtotal) * 100) : 0,
+  };
+}
