@@ -81,6 +81,12 @@ export const api = {
     return post("/profile/logo/", form);
   },
   removeLogo: () => del("/profile/logo/"),
+  uploadBrandLogo: (file) => {
+    const form = new FormData();
+    form.append("brand_logo", file);
+    return post("/profile/brand-logo/", form);
+  },
+  removeBrandLogo: () => del("/profile/brand-logo/"),
   listActivity: () => get("/activity/"),
 
   listCableTypes: () => get("/cable-types/"),
@@ -122,4 +128,15 @@ export const api = {
   reviseQuote: (id) => post(`/quotes/${id}/revise/`),
   deleteQuote: (id) => del(`/quotes/${id}/`),
   quotePdf: (id) => request(`/quotes/${id}/pdf/`, { raw: true }),
+
+  listWaybills: ({ quote, page = 1 } = {}) => {
+    const params = new URLSearchParams({ page: String(page) });
+    if (quote) params.set("quote", String(quote));
+    return get(`/waybills/?${params}`);
+  },
+  createWaybill: (quoteId) => post("/waybills/", { quote: quoteId }),
+  getWaybill: (id) => get(`/waybills/${id}/`),
+  updateWaybill: (id, data) => put(`/waybills/${id}/`, data),
+  deleteWaybill: (id) => del(`/waybills/${id}/`),
+  waybillPdf: (id) => request(`/waybills/${id}/pdf/`, { raw: true }),
 };

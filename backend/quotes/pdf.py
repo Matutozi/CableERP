@@ -9,13 +9,14 @@ from weasyprint import HTML
 PDF_CACHE_SECONDS = 60 * 60 * 24
 
 
-def _logo_uri(business):
-    if not business.logo:
+def image_uri(image):
+    """A location WeasyPrint can read an uploaded image from, or None when there isn't one."""
+    if not image:
         return None
     try:
-        path = Path(business.logo.path)
+        path = Path(image.path)
     except NotImplementedError:  # storage without local files (e.g. S3): let WeasyPrint fetch the URL
-        return business.logo.url
+        return image.url
     return path.as_uri() if path.exists() else None
 
 
@@ -33,6 +34,11 @@ def render_quote_pdf(quote):
     """Return the quote as PDF bytes. Expects `quote` fetched with line_items__colours prefetched."""
     html = render_to_string(
         "quotes/quote_pdf.html",
-        {"quote": quote, "business": quote.business, "logo_uri": _logo_uri(quote.business)},
+        {
+            "quote": quote,
+            "business": quote.business,
+            "logo_uri": image_uri(quote.business.logo),
+            "brand_logo_uri": image_uri(quote.business.brand_logo),
+        },
     )
     return HTML(string=html).write_pdf()

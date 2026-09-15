@@ -23,6 +23,8 @@
   .business-details { color: #555; font-size: 8.8pt; line-height: 1.5; }
   .doc-title { text-align: right; width: 60mm; }
   .doc-title h1 { font-size: 13pt; letter-spacing: 1.5pt; margin: 0 0 2mm; }
+  /* The manufacturer's mark, beside the distributor's own logo on the left. */
+  .brand-logo { max-width: 32mm; max-height: 16mm; margin-bottom: 2.5mm; }
   .doc-meta { width: auto; margin-left: auto; }
   .doc-meta th { text-align: left; font-weight: normal; color: #888; padding: 0.4mm 3mm 0.4mm 0; }
   .doc-meta td { text-align: right; padding: 0.4mm 0; }
@@ -77,6 +79,7 @@
         </div>
       </td>
       <td class="doc-title">
+        {% if brand_logo_uri %}<img class="brand-logo" src="{{ brand_logo_uri }}" alt="">{% endif %}
         <h1>QUOTATION</h1>
         <table class="doc-meta">
           <tr><th>Ref</th><td>{{ quote.reference_number }}</td></tr>

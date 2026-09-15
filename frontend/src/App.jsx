@@ -11,6 +11,8 @@ import Purchases from "./pages/Purchases.jsx";
 import QuotePreview from "./pages/QuotePreview.jsx";
 import Register from "./pages/Register.jsx";
 import Settings from "./pages/Settings.jsx";
+import WaybillEditor from "./pages/WaybillEditor.jsx";
+import WaybillList from "./pages/WaybillList.jsx";
 
 export default function App() {
   const { user } = useAuth();
@@ -25,6 +27,8 @@ export default function App() {
         <Route index element={<Dashboard />} />
         <Route path="quotes" element={<QuoteList />} />
         <Route path="quotes/new" element={<QuoteEditor />} />
+        <Route path="quotes/waybills" element={<WaybillList />} />
+        <Route path="quotes/waybills/:id" element={<WaybillEditor />} />
         <Route path="quotes/:id" element={<QuoteEditor />} />
         <Route path="quotes/:id/preview" element={<QuotePreview />} />
         <Route path="catalogue" element={<Catalogue />} />

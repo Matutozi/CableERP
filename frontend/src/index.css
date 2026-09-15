@@ -391,13 +391,21 @@ textarea { resize: vertical; line-height: 1.5; }
 .preview-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; max-width: 760px; margin: 0 auto 14px; }
 .back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-weight: 500; }
 .back-link:hover { color: var(--text); }
-.toolbar-actions { display: flex; gap: 8px; }
+.toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Three actions don't fit a phone in one row: WhatsApp, the main one, takes the full width
+   on a row of its own rather than being pushed off the edge. */
+@media (max-width: 560px) {
+  .toolbar-actions { width: 100%; }
+  .toolbar-actions .btn { flex: 1; }
+  .toolbar-actions .btn-whatsapp { flex-basis: 100%; order: -1; }
+}
 .preview-page .alert { max-width: 760px; margin-left: auto; margin-right: auto; }
 .doc { max-width: 760px; margin: 0 auto; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 @media (min-width: 640px) { .doc { padding: 22px; } }
 .doc-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 2px solid var(--text); }
 .doc-business { display: flex; align-items: flex-start; gap: 12px; }
 .doc-logo { max-width: 64px; max-height: 48px; object-fit: contain; }
+.doc-brand-logo { display: block; max-width: 84px; max-height: 40px; margin: 0 0 6px auto; object-fit: contain; }
 .doc-business-name { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
 .doc-small { color: var(--text-2); font-size: 12px; line-height: 1.6; }
 .doc-title { margin-left: auto; text-align: right; }
@@ -540,3 +548,26 @@ textarea { resize: vertical; line-height: 1.5; }
 .movement-date { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .movement .trend-panel { margin: 0 12px 12px; }
 @media (max-width: 420px) { .movement-row .sparkline { display: none; } }
+
+/* ---------- Waybills ---------- */
+.waybill-rows .waybill-row {
+  display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-top: 1px solid var(--border);
+  color: inherit; text-decoration: none;
+}
+.waybill-rows .waybill-row:first-child { border-top: 0; }
+.waybill-rows .waybill-row:hover { background: var(--subtle-2); }
+.waybill-main { flex: 1; min-width: 0; }
+.waybill-customer { display: block; font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.waybill-sub { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+.waybill-ref { color: var(--text-2); font-size: 12.5px; white-space: nowrap; }
+
+.waybill-item-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.waybill-model { display: block; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.waybill-desc { display: block; font-size: 14.5px; font-weight: 500; }
+.waybill-editor .colour-input .colour-abbr { min-width: 0; }
+.waybill-foot { margin-top: 18px; }
+@media (max-width: 767px) {
+  .waybill-editor .page-head { flex-wrap: wrap; }
+  .waybill-editor .page-actions { width: 100%; }
+  .waybill-editor .page-actions .btn { flex: 1; }
+}

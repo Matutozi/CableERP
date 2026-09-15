@@ -85,7 +85,7 @@ On the same Wi-Fi, start Vite with `npm run dev -- --host`, add your computer's 
 
 ```bash
 cd backend
-python manage.py test          # 92 tests
+python manage.py test          # 108 tests
 ```
 
 There is also a browser smoke test — sign in, build a quote, check the totals, download the PDF. It needs a seeded stack running on http://localhost:5173:
@@ -107,6 +107,7 @@ backend/
   catalogue/   CableType, CableSize, Accessory, PriceChange (selling-price history)
   quotes/      Quote, QuoteLineItem, QuoteLineItemColour, PDF rendering (pdf.py + templates/quotes/quote_pdf.html)
   purchasing/  Purchase, PurchaseItem, costing.py (landed cost, unit conversion, moving average)
+  waybills/    Waybill, WaybillItem, WaybillItemColour, PDF rendering (pdf.py + templates/waybills/waybill_pdf.html)
 frontend/src/
   pages/       Login, Register, Dashboard, QuoteList, QuoteEditor, QuotePreview,
                Catalogue (cables), Accessories, Purchases, Settings
@@ -118,7 +119,9 @@ frontend/src/
 ### Screens
 
 - **Quote builder** — items are edited in place on cards. Type or pick a cable type and size (the price fills in from the catalogue and stays editable); cables with colour variants take a quantity per colour. **Add accessory** adds a card for a non-cable product. Anything not in the catalogue is quoted exactly as typed. A sticky bar keeps subtotal, VAT, transport and the grand total in view. **Generate PDF** saves and opens the preview.
-- **Quote preview** — an on-screen copy of the PDF with **Download** and **Send on WhatsApp**.
+- **Quote preview** — an on-screen copy of the PDF with **Download**, **Send on WhatsApp** and **Create waybill**.
+- **Waybills** — a tab beside Quotes. **Create waybill** copies a quote's lines into a waybill modelled on the ones distributors already hand to drivers: landscape, no prices, a column per colour, quantities totalled per unit, and *Received by* / *Sales Rep.* signature lines. Fill in the branch and vehicle, lower quantities for a part delivery, and download or share the PDF. One quote can have several waybills.
+- **Two logos** — Settings takes your logo and the logo of the manufacturer you distribute. Both print on quotations and waybills.
 - **Catalogue** — three tabs: **Cables** (types → sizes, prices edited in place), **Accessories** (name, unit, price, all edited in place) and **Purchases**. Every catalogue row shows what it last cost and the margin the current price leaves, or says plainly that no purchase has been recorded.
 - **Purchases** — record a delivery: supplier, date, what arrived and what was paid, plus transport and clearing for the load. Stock bought by the coil and sold by the metre is converted once and remembered. Tap a recorded delivery to see what was in it, correct it, or delete it — costs are recalculated either way.
 - **Price trend** — tap any catalogue item's cost line to chart what you have charged against what you have paid, over time, with the last few changes listed underneath. Rising cost is shown in red, falling in green: on the cost line, up is the bad direction.
@@ -129,11 +132,12 @@ frontend/src/
 | Area | Endpoints |
 |---|---|
 | Auth | `POST /api/auth/login/`, `POST /api/auth/register/`, `POST /api/auth/logout/`, `GET /api/auth/me/` |
-| Profile | `GET/PUT /api/profile/`, `POST/DELETE /api/profile/logo/`, `GET /api/activity/` |
+| Profile | `GET/PUT /api/profile/`, `POST/DELETE /api/profile/logo/`, `POST/DELETE /api/profile/brand-logo/`, `GET /api/activity/` |
 | Cables | `GET/POST /api/cable-types/`, `GET/PUT/PATCH/DELETE /api/cable-types/{id}/`, `GET/POST /api/cable-types/{id}/sizes/`, `GET/PUT/PATCH/DELETE /api/sizes/{id}/`, `GET /api/sizes/{id}/history/` |
 | Accessories | `GET/POST /api/accessories/`, `GET/PUT/PATCH/DELETE /api/accessories/{id}/`, `GET /api/accessories/{id}/history/` |
 | Trends | `GET /api/price-movements/` (the six items restocked most recently, with their series) |
 | Purchases | `GET/POST /api/purchases/`, `GET/PUT/PATCH/DELETE /api/purchases/{id}/` |
+| Waybills | `POST /api/waybills/` (`{"quote": id}`), `GET /api/waybills/` (`?quote=`), `GET/PUT/PATCH/DELETE /api/waybills/{id}/`, `GET /api/waybills/{id}/pdf/` |
 | Quotes | `GET/POST /api/quotes/`, `GET/PUT/PATCH/DELETE /api/quotes/{id}/`, `POST /api/quotes/{id}/revise/`, `GET /api/quotes/{id}/pdf/` (`?inline=1` to view instead of download) |
 
 Unauthenticated requests get `401`; requests for another business's data get `404`.
@@ -157,6 +161,7 @@ Unauthenticated requests get `401`; requests for another business's data get `40
 - **Cost never reaches the customer.** It is absent from the PDF template and the quote preview, and a test renders a quote's PDF and asserts the cost does not appear in the bytes. The cost fields are listed in one constant per serializer so Phase 6 can hide them from staff who aren't the owner in a single edit.
 - **Amounts are bounded**: ₦1bn per unit price and 100,000 per line quantity, so a number too large for the totals can never be saved. Landed cost is *derived* rather than entered, so the delivery's arithmetic is run before anything is written and a line that works out to an impossible cost per unit is refused by name — a mistyped conversion factor is wrong by 100×, not by a little.
 - **A sale unit cannot change once costs exist.** Recorded costs are held per sale unit, and nothing in the ledger says how many metres are in a coil bought as a coil — so switching a type from coils to metres is refused rather than silently leaving every cost describing a different thing. Add a separate catalogue entry instead.
+- **A waybill is its own record, not a restyled quote.** It copies the quote's lines when created and never reads the quote again, so a part delivery can change quantities without touching the quotation, and deleting the quote keeps the waybill. It carries no prices at all. Waybills are numbered `WB-YYYYMMDD-NNN`, independently of quotes.
 - **Dates cannot be in the future.** A delivery dated next year would otherwise win "most recent" forever and silently become the cost every quote is priced against; the same check applies to quote dates, which drive reference numbers.
 - **Sign-in, sign-up and PDF rendering are rate limited** (10/min, 20/hour and 60/hour). Throttle counters live in Django's cache, so give the deployment a shared cache such as Redis once it runs more than one worker.
 - **A quote holds up to 200 items**, and its PDF is rendered once per version of the quote and of the business profile — repeat downloads come from the cache.

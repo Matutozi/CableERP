@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "catalogue",
     "quotes",
     "purchasing",
+    "waybills",
 ]
 
 MIDDLEWARE = [
