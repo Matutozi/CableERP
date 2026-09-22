@@ -221,7 +221,8 @@ addition afterwards. The app must never block a sale because the data isn't set 
 | Phase | Name | Status | Depends on | Core value |
 |---|---|---|---|---|
 | 1 | Quote builder | **Shipped** — live on a single droplet | — | Quote fast, look professional |
-| 2 | Cost and margin | **Built, not deployed** — on branch `phase-2-cost-and-margin` | 1 | Never sell below cost |
+| 2 | Cost and margin | **Shipped** — deployed 22 Sep 2026 | 1 | Never sell below cost |
+| — | Waybills | **Shipped** — built ahead of Phase 3 (see §10.5) | 1 | The driver carries a price-free delivery note |
 | 3 | Sales and customers | Planned | 1 | Know what was actually sold, and to whom |
 | 4 | Reporting | Planned | 2, 3 | Revenue, profit and trends |
 | 5 | Inventory | Planned | 2, 3 | Know what is in the warehouse |
@@ -338,7 +339,7 @@ AuditLog         business user action summary reference created_at
 
 ---
 
-## 9. Phase 2 — Cost and margin *(built, not deployed)*
+## 9. Phase 2 — Cost and margin *(shipped)*
 
 ### 9.1 Goal
 
