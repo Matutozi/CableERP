@@ -148,7 +148,7 @@ function AddSizeForm({ cableType, onAdded, onClose }) {
   );
 }
 
-function CableTypeCard({ cableType, open, onToggle, onChange, onDelete }) {
+function CableTypeCard({ cableType, showFactoryPrice, open, onToggle, onChange, onDelete }) {
   const [editing, setEditing] = useState(false);
   const [addingSize, setAddingSize] = useState(false);
   const [trendFor, setTrendFor] = useState(null);
@@ -163,6 +163,22 @@ function CableTypeCard({ cableType, open, onToggle, onChange, onDelete }) {
         size_label: size.size_label,
         default_price: price,
         order: size.order,
+      });
+      updateSizes((sizes) => sizes.map((entry) => (entry.id === updated.id ? updated : entry)));
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }
+
+  async function saveFactoryPrice(size, price) {
+    setError("");
+    try {
+      const updated = await api.updateSize(size.id, {
+        size_label: size.size_label,
+        default_price: size.default_price,
+        order: size.order,
+        factory_price: price,
       });
       updateSizes((sizes) => sizes.map((entry) => (entry.id === updated.id ? updated : entry)));
     } catch (err) {
@@ -248,6 +264,15 @@ function CableTypeCard({ cableType, open, onToggle, onChange, onDelete }) {
                   <CostNote row={size} unit={unitLabel(cableType.unit, 1)} />
                 </button>
                 <span className="list-row-actions">
+                  {showFactoryPrice && (
+                    <InlinePrice
+                      price={size.factory_price ?? ""}
+                      label={`Factory price for ${size.size_label}`}
+                      placeholder="Factory"
+                      variant="factory"
+                      onSave={(price) => saveFactoryPrice(size, price)}
+                    />
+                  )}
                   <InlinePrice
                     price={size.default_price}
                     label={`Price for ${size.size_label}`}
@@ -298,6 +323,7 @@ export default function Catalogue() {
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
   const [openId, setOpenId] = useState(null);
+  const [showFactoryPrice, setShowFactoryPrice] = useState(false);
 
   useEffect(() => {
     api
@@ -307,7 +333,22 @@ export default function Catalogue() {
         setOpenId(list[0]?.id ?? null);
       })
       .catch((err) => setError(err.message));
+    api
+      .getProfile()
+      .then((profile) => setShowFactoryPrice(profile.show_factory_price))
+      .catch(() => {});
   }, []);
+
+  async function toggleFactoryPrice(next) {
+    // Optimistic: the switch should feel instant, and a failure puts it straight back.
+    setShowFactoryPrice(next);
+    try {
+      await api.updateProfile({ show_factory_price: next });
+    } catch (err) {
+      setShowFactoryPrice(!next);
+      setError(err.message);
+    }
+  }
 
   const changeType = (id) => (update) =>
     setTypes((current) => current.map((type) => (type.id === id ? update(type) : type)));
@@ -343,6 +384,20 @@ export default function Catalogue() {
       />
 
       {error && <div className="alert alert-error">{error}</div>}
+
+      <label className="factory-toggle">
+        <input
+          type="checkbox"
+          checked={showFactoryPrice}
+          onChange={(event) => toggleFactoryPrice(event.target.checked)}
+        />
+        <span>
+          Show factory price on quotes
+          <small>
+            What the manufacturer would charge your customer buying direct, so they see what they save.
+          </small>
+        </span>
+      </label>
 
       {adding && (
         <section className="panel">

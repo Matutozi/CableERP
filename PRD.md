@@ -347,6 +347,62 @@ AuditLog         business user action summary reference created_at
   Phase 6.
 - Uploaded logos are on local disk, not object storage.
 
+### 8.8 Factory price column *(requested, not built)*
+
+Some distributors want the quotation to show the **factory price** beside their own, so the customer
+can see what they are saving. Others would never show it. It is therefore a toggle, not a layout
+change.
+
+**Definition.** The factory price is what the manufacturer would charge *this customer* if they
+bypassed the distributor and bought direct. It is a competitive comparison — "buying from me costs
+you less than going to the factory yourself" — and it is the distributor's sales argument for
+existing at all.
+
+It is **not** what the distributor paid. That is `last_unit_cost`, it is confidential, and the two
+numbers sit on opposite sides of the selling price:
+
+```
+        last_unit_cost   <   selling price   <   factory price
+        (what you paid)      (what you quote)    (what they would pay direct)
+        CONFIDENTIAL                             SHOWN WHEN TOGGLED ON
+```
+
+Because of that ordering, a factory price **below** the quoted price is almost always a data error —
+a stale figure, or someone has typed the cost in by mistake. The system should say so rather than
+print a negative saving to a customer.
+
+| ID | Requirement |
+|---|---|
+| P1-F24 | A catalogue item may carry a factory price — what the manufacturer would charge an end buyer going direct |
+| P1-F25 | A quote may show a factory price column, with the saving per line and in total |
+| P1-F26 | The toggle is per quote, defaulting to a business-level preference |
+| P1-F27 | The factory price is **snapshotted onto the line** when the quote is written, like every other figure on a document |
+| P1-F28 | A line with no factory price shows nothing rather than a zero, and is excluded from the saving total |
+| P1-F29 | A factory price at or below the quoted price is refused with a warning — it means a stale figure or cost typed in by mistake, and would print a negative saving |
+| P1-F30 | A factory price records when it was last updated, so a seller can see at a glance which figures have gone stale |
+
+**The trap.** These are two different numbers on opposite sides of the price, and the implementation
+must never derive one from the other. `last_unit_cost` reaching a customer-facing document would
+hand them the distributor's buying position — the thing the waybill's price-free layout and the
+separate `view_costs` permission exist to prevent. A single wrong field reference in the discount
+column does exactly that.
+
+Snapshotting matters for the same reason payment details are snapshotted (§5, principle P1): if the
+factory price is read live at print time, reprinting last month's quote shows the customer a
+different discount than the one they were offered.
+
+**Open question.** Where does the number come from? The manufacturer's price list changes, and the
+distributor learns it periodically rather than continuously.
+
+- **Per catalogue item**, maintained by the seller — less work per quote, but it goes stale, and a
+  discount claimed against last year's factory price is one the customer can disprove.
+- **Per quote line**, typed when it is worth quoting against — always current, retyped every time.
+- **Both** — a maintained default that can be overridden on the line. Probably right, and the most
+  UI on a phone screen.
+
+P1-F30 exists because whichever is chosen, staleness is the failure mode that embarrasses a seller
+in front of a customer.
+
 ---
 
 ## 9. Phase 2 — Cost and margin *(shipped)*

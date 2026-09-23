@@ -3,8 +3,9 @@ import { toNumber } from "../services/format.js";
 import MoneyInput from "./MoneyInput.jsx";
 
 /** A catalogue price edited in place: saves on blur or Enter, then shows a tick. */
-export default function InlinePrice({ price, label, onSave }) {
-  const [value, setValue] = useState(String(toNumber(price)));
+export default function InlinePrice({ price, label, onSave, placeholder, variant }) {
+  const blank = price === "" || price === null || price === undefined;
+  const [value, setValue] = useState(blank ? "" : String(toNumber(price)));
   const [state, setState] = useState("idle"); // idle | saving | saved
   const [lastPrice, setLastPrice] = useState(price);
 
@@ -12,12 +13,12 @@ export default function InlinePrice({ price, label, onSave }) {
   // Resyncing during render rather than in an effect keeps it to a single render pass.
   if (lastPrice !== price) {
     setLastPrice(price);
-    setValue(String(toNumber(price)));
+    setValue(blank ? "" : String(toNumber(price)));
   }
 
   async function commit() {
-    if (value === "" || toNumber(value) === toNumber(price)) {
-      setValue(String(toNumber(price)));
+    if (value === "" || (!blank && toNumber(value) === toNumber(price))) {
+      setValue(blank ? "" : String(toNumber(price)));
       return;
     }
     setState("saving");
@@ -27,16 +28,17 @@ export default function InlinePrice({ price, label, onSave }) {
     } catch {
       // The caller shows the error; put the saved price back.
       setState("idle");
-      setValue(String(toNumber(price)));
+      setValue(blank ? "" : String(toNumber(price)));
     }
   }
 
   return (
-    <span className="inline-price">
+    <span className={`inline-price${variant ? ` inline-price-${variant}` : ""}`}>
       <MoneyInput
         className="inline-input"
         value={value}
         aria-label={label}
+        placeholder={placeholder}
         onChange={(next) => {
           setValue(next);
           setState("idle");

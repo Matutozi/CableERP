@@ -1,0 +1,199 @@
+"""Walk every API route as a restricted member and assert nothing confidential comes back.
+
+Gating endpoints one at a time is whack-a-mole: the next endpoint someone adds will not be gated,
+and no existing test will notice. This suite enumerates the URL conf instead, so a new route is
+covered the day it is registered.
+
+What counts as confidential here:
+
+* **cost** — what the business paid. Hidden from anyone without `view_costs` (PRD P6-F5).
+* **bank details** — where customers send money. Hidden from anyone without `bank_details`.
+"""
+
+from decimal import Decimal
+
+from django.contrib.auth import get_user_model
+from django.urls import get_resolver
+from rest_framework.test import APITestCase
+
+from catalogue.models import CableSize, CableType
+from purchasing.models import Purchase, PurchaseItem
+from quotes.models import Quote, QuoteLineItem, QuoteLineItemColour
+
+from .models import AuditLog, BusinessProfile, Feature, Membership, provision_business, record
+
+User = get_user_model()
+PASSWORD = "a-strong-pass-123"  # noqa: S105
+
+# Strings that must never reach a member who lacks the matching permission. Distinctive values, so
+# a match is unambiguous rather than a coincidence of formatting.
+SECRET_COST = "77777"  # noqa: S105
+SECRET_ACCOUNT = "0125277464"  # noqa: S105
+
+COST_KEYS = {
+    "last_unit_cost",
+    "average_unit_cost",
+    "margin_percentage",
+    "margin_amount",
+    "cost_amount",
+    "unit_cost",
+    "total_cost",
+    "costed_subtotal",
+    "total_margin",
+    "margin_coverage",
+    "cost",
+}
+
+
+def api_routes():
+    """Every registered `api/` route, with regex placeholders filled in."""
+    found = []
+
+    def walk(resolver, prefix=""):
+        for pattern in resolver.url_patterns:
+            if hasattr(pattern, "url_patterns"):
+                walk(pattern, prefix + str(pattern.pattern))
+            else:
+                found.append(prefix + str(pattern.pattern))
+
+    walk(get_resolver())
+    return [r for r in found if r.startswith("api/")]
+
+
+def find_keys(payload, keys):
+    """Every one of `keys` appearing anywhere in a nested response body."""
+    hits = set()
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key in keys:
+                hits.add(key)
+            hits |= find_keys(value, keys)
+    elif isinstance(payload, list):
+        for item in payload:
+            hits |= find_keys(item, keys)
+    return hits
+
+
+class NoConfidentialLeakTests(APITestCase):
+    """A sales member must not be able to reach cost or bank details by any route."""
+
+    @classmethod
+    def setUpTestData(cls):
+        owner = User.objects.create_user("ada", password=PASSWORD)
+        cls.business = BusinessProfile.objects.create(
+            user=owner,
+            business_name="Ada Cables",
+            bank_name="Wema Bank",
+            account_name="Ada Cables",
+            account_number=SECRET_ACCOUNT,
+        )
+        provision_business(cls.business, owner)
+
+        cable_type = CableType.objects.create(business=cls.business, name="Singles", unit="coil")
+        cls.size = CableSize.objects.create(cable_type=cable_type, size_label="1.5mm", default_price=Decimal("33000"))
+        CableSize.objects.filter(pk=cls.size.pk).update(
+            last_unit_cost=Decimal(SECRET_COST), average_unit_cost=Decimal(SECRET_COST)
+        )
+
+        purchase = Purchase.objects.create(business=cls.business, date="2026-09-01", supplier_name="Coleman")
+        PurchaseItem.objects.create(
+            purchase=purchase, cable_size=cls.size, quantity=Decimal("1"), unit_cost=Decimal(SECRET_COST)
+        )
+
+        quote = Quote.objects.create(
+            business=cls.business, customer_name="Musa", staff_name="Ada", reference_number="QT-1"
+        )
+        line = QuoteLineItem.objects.create(
+            quote=quote,
+            cable_size=cls.size,
+            cable_type_name="Singles",
+            size_label="1.5mm",
+            unit="coil",
+            unit_price=Decimal("40000"),
+        )
+        QuoteLineItemColour.objects.create(line_item=line, colour="", quantity=Decimal("2"))
+        QuoteLineItem.objects.filter(pk=line.pk).update(unit_cost=Decimal(SECRET_COST))
+        cls.quote = quote
+
+        # A bank change writes the account number into its own summary.
+        record(cls.business, owner, AuditLog.Action.BANK_CHANGED, f"account number — → {SECRET_ACCOUNT}")
+
+        seller = User.objects.create_user("emeka", password=PASSWORD)
+        template = cls.business.role_templates.get(name="Sales")
+        cls.seller = seller
+        Membership.create_from_template(cls.business, seller, template, all_stores=True)
+
+    def setUp(self):
+        self.client.force_authenticate(self.seller)
+
+    def _reachable_responses(self):
+        """GET every route a sales member can reach, with ids substituted in."""
+        substitutions = {
+            "(?P<pk>[^/.]+)": str(self.size.id),
+        }
+        for route in api_routes():
+            url = "/" + route.replace("^", "").replace("$", "")
+            for pattern, value in substitutions.items():
+                url = url.replace(pattern, value)
+            if "?P<" in url or "auth/" in url or "logo" in url:
+                continue  # unresolved placeholder, or a non-JSON / auth-flow endpoint
+            yield url, self.client.get(url)
+
+    def test_no_route_returns_a_cost_key_to_a_member_without_view_costs(self):
+        offenders = {}
+        for url, response in self._reachable_responses():
+            if response.status_code != 200:
+                continue
+            hits = find_keys(getattr(response, "data", None), COST_KEYS)
+            if hits:
+                offenders[url] = sorted(hits)
+        self.assertEqual(offenders, {}, f"cost fields reachable without view_costs: {offenders}")
+
+    def test_no_route_returns_the_cost_value_to_a_member_without_view_costs(self):
+        """Belt and braces: the key could be renamed, the number cannot be disguised."""
+        offenders = [
+            url
+            for url, response in self._reachable_responses()
+            if response.status_code == 200 and SECRET_COST in response.content.decode()
+        ]
+        self.assertEqual(offenders, [], f"the cost value appeared at: {offenders}")
+
+    def test_no_route_returns_the_account_number_to_a_member_without_bank_details(self):
+        offenders = [
+            url
+            for url, response in self._reachable_responses()
+            if response.status_code == 200 and SECRET_ACCOUNT in response.content.decode()
+        ]
+        self.assertEqual(offenders, [], f"the account number appeared at: {offenders}")
+
+    def test_the_purchase_ledger_is_refused_outright(self):
+        self.assertEqual(self.client.get("/api/purchases/").status_code, 403)
+
+    def test_the_catalogue_is_readable_but_not_repricable(self):
+        """A salesperson cannot quote without the catalogue, and must not reprice it (PRD P6-F6)."""
+        self.assertEqual(self.client.get("/api/cable-types/").status_code, 200)
+        refused = self.client.patch(f"/api/sizes/{self.size.id}/", {"default_price": "1.00"}, format="json")
+        self.assertEqual(refused.status_code, 403)
+
+    def test_an_owner_still_sees_everything(self):
+        """The gates must not have broken the person they do not apply to."""
+        self.client.force_authenticate(self.business.user)
+        catalogue = self.client.get("/api/cable-types/")
+        self.assertEqual(catalogue.status_code, 200)
+        self.assertIn("last_unit_cost", catalogue.data[0]["sizes"][0])
+        self.assertEqual(self.client.get("/api/purchases/").status_code, 200)
+        self.assertIn(SECRET_ACCOUNT, self.client.get("/api/activity/").content.decode())
+
+    def test_granting_view_costs_restores_the_figures(self):
+        """Proves the gate is reading permissions, not hiding cost from everyone but owners."""
+        membership = Membership.objects.get(user=self.seller)
+        membership.set_permissions([*membership.permissions, Feature.VIEW_COSTS])
+        membership.save()
+
+        response = self.client.get("/api/cable-types/")
+        self.assertIn("last_unit_cost", response.data[0]["sizes"][0])
+
+    def test_the_enumeration_actually_visited_something(self):
+        """A silent zero-route walk would make every test above pass for the wrong reason."""
+        visited = [url for url, response in self._reachable_responses() if response.status_code == 200]
+        self.assertGreaterEqual(len(visited), 4, f"only visited {visited}")

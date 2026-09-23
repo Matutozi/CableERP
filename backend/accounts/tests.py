@@ -771,3 +771,22 @@ class InvitationTests(APITestCase):
         self.assertEqual(self.business.memberships.count(), 1)
         self.assertEqual(self.business.role_templates.count(), 3)
         self.assertTrue(membership.is_owner)
+
+
+class FactoryPricePreferenceTests(APITestCase):
+    """The catalogue toggle is the business's own, unlike the operator-set store allowance."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("ada", password=PASSWORD)
+        self.business = BusinessProfile.objects.create(user=self.user, business_name="Ada Cables")
+        self.client.force_authenticate(self.user)
+
+    def test_the_profile_reports_the_preference(self):
+        response = self.client.get("/api/profile/")
+        self.assertIs(response.data["show_factory_price"], False)
+
+    def test_the_owner_can_turn_it_on(self):
+        response = self.client.patch("/api/profile/", {"show_factory_price": True}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.business.refresh_from_db()
+        self.assertTrue(self.business.show_factory_price)

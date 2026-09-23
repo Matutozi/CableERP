@@ -1,8 +1,10 @@
 from django.db import transaction
 from rest_framework import viewsets
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import IsAuthenticated
 
-from accounts.models import AuditLog, naira, record
+from accounts.models import AuditLog, Feature, naira, record
+from accounts.permissions import requires
 from accounts.utils import get_business
 
 from . import costing
@@ -17,6 +19,9 @@ class PurchasePagination(PageNumberPagination):
 
 
 class PurchaseViewSet(viewsets.ModelViewSet):
+    # The purchase ledger is every supplier and every price paid. Unlike the catalogue there is no
+    # part of it a salesperson needs, so the gate is the whole endpoint rather than its fields.
+    permission_classes = [IsAuthenticated, requires(Feature.PURCHASES)]
     """Deliveries, and the cost they leave behind on the catalogue.
 
     Every write recomputes the cached cost of the rows it touches. That work is small — one

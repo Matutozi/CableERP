@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
@@ -350,3 +352,91 @@ class UnitChangeTests(APITestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("per roll", str(response.data))
+
+
+class FactoryPriceTests(APITestCase):
+    """What the manufacturer would charge a customer buying direct (SYSTEM_DESIGN.md Q27, Q28)."""
+
+    def setUp(self):
+        self.user, self.business = make_business("ada")
+        self.client.force_authenticate(self.user)
+        self.cable_type = CableType.objects.create(business=self.business, name="Singles", unit="coil")
+
+    def _create_size(self, **overrides):
+        payload = {"size_label": "1.5mm", "default_price": "33000.00", **overrides}
+        return self.client.post(f"/api/cable-types/{self.cable_type.id}/sizes/", payload, format="json")
+
+    def test_a_factory_price_above_the_selling_price_is_accepted(self):
+        response = self._create_size(factory_price="40000.00")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["factory_price"], "40000.00")
+        self.assertEqual(response.data["factory_saving"], "7000.00")
+
+    def test_a_factory_price_below_the_selling_price_is_refused(self):
+        """It means a stale figure, or the purchase cost typed into the wrong box."""
+        response = self._create_size(factory_price="20000.00")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("factory_price", response.data)
+
+    def test_a_factory_price_equal_to_the_selling_price_is_refused(self):
+        """Equal is not a discount, so printing it would claim a saving of nothing."""
+        self.assertEqual(self._create_size(factory_price="33000.00").status_code, 400)
+
+    def test_the_refusal_explains_it_is_not_the_purchase_cost(self):
+        """The dangerous mistake is typing cost here, so the message has to name it."""
+        response = self._create_size(factory_price="20000.00")
+        self.assertIn("not what you paid", str(response.data["factory_price"]).lower())
+
+    def test_a_factory_price_is_optional(self):
+        response = self._create_size()
+        self.assertEqual(response.status_code, 201)
+        self.assertIsNone(response.data["factory_price"])
+        self.assertIsNone(response.data["factory_saving"])
+
+    def test_setting_a_factory_price_records_when(self):
+        size = CableSize.objects.get(pk=self._create_size().data["id"])
+        self.assertIsNone(size.factory_price_updated_at)
+
+        self.client.patch(f"/api/sizes/{size.id}/", {"factory_price": "40000.00"}, format="json")
+        size.refresh_from_db()
+        self.assertIsNotNone(size.factory_price_updated_at)
+
+    def test_resaving_the_same_factory_price_does_not_touch_the_timestamp(self):
+        """Otherwise every unrelated edit would make a stale figure look freshly confirmed."""
+        size = CableSize.objects.get(pk=self._create_size(factory_price="40000.00").data["id"])
+        first = size.factory_price_updated_at
+
+        self.client.patch(f"/api/sizes/{size.id}/", {"factory_price": "40000.00"}, format="json")
+        size.refresh_from_db()
+        self.assertEqual(size.factory_price_updated_at, first)
+
+    def test_the_client_cannot_write_the_timestamp(self):
+        response = self._create_size(factory_price="40000.00", factory_price_updated_at="2020-01-01T00:00:00Z")
+        size = CableSize.objects.get(pk=response.data["id"])
+        self.assertNotEqual(size.factory_price_updated_at.year, 2020)
+
+    def test_an_accessory_carries_a_factory_price_too(self):
+        """The rule has to hold on both catalogue models, not just cables."""
+        ok = self.client.post(
+            "/api/accessories/",
+            {"name": "Lugs", "unit": "piece", "default_price": "500.00", "factory_price": "800.00"},
+            format="json",
+        )
+        self.assertEqual(ok.status_code, 201, ok.data)
+
+        bad = self.client.post(
+            "/api/accessories/",
+            {"name": "Tape", "unit": "piece", "default_price": "500.00", "factory_price": "200.00"},
+            format="json",
+        )
+        self.assertEqual(bad.status_code, 400)
+
+    def test_factory_price_is_independent_of_cost(self):
+        """The two numbers sit on opposite sides of the price and must not be derived from each other."""
+        size = CableSize.objects.get(pk=self._create_size(factory_price="40000.00").data["id"])
+        CableSize.objects.filter(pk=size.pk).update(last_unit_cost="25000.0000")
+        size.refresh_from_db()
+
+        self.assertEqual(size.factory_price, Decimal("40000.00"))
+        self.assertEqual(size.last_unit_cost, Decimal("25000.0000"))
+        self.assertTrue(size.last_unit_cost < size.default_price < size.factory_price)

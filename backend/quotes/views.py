@@ -5,10 +5,12 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 
-from accounts.models import AuditLog, BusinessProfile, naira, record
+from accounts.models import AuditLog, BusinessProfile, Feature, naira, record
+from accounts.permissions import requires
 from accounts.utils import get_business
 
 from .models import Quote
@@ -29,6 +31,7 @@ class PdfRateThrottle(UserRateThrottle):
 
 
 class QuoteViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, requires(Feature.QUOTES)]
     pagination_class = QuotePagination
 
     def get_queryset(self):

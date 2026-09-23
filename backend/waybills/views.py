@@ -2,9 +2,11 @@ from django.http import HttpResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from accounts.models import AuditLog, record
+from accounts.models import AuditLog, Feature, record
+from accounts.permissions import requires
 from accounts.utils import get_business
 from quotes.views import PdfRateThrottle
 
@@ -20,6 +22,7 @@ class WaybillPagination(PageNumberPagination):
 
 
 class WaybillViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, requires(Feature.WAYBILLS)]
     pagination_class = WaybillPagination
 
     def get_queryset(self):

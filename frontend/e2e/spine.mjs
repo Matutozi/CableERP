@@ -4,8 +4,11 @@
  */
 import { chromium } from "playwright";
 
-const BASE = process.env.BASE_URL ?? "http://127.0.0.1:5173";
-const USER = process.env.NEW_USER ?? "browsertest";
+import { BASE, launchOptions } from "./env.mjs";
+
+// Unique per run: re-running against a database that already has this user would otherwise fail
+// at registration and surface only as a navigation timeout.
+const USER = process.env.NEW_USER ?? `browsertest${Date.now().toString(36)}`;
 const failures = [];
 function check(label, actual, expected) {
   const ok = actual === expected;
@@ -13,10 +16,7 @@ function check(label, actual, expected) {
   if (!ok) failures.push(label);
 }
 
-const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_EXECUTABLE || undefined,
-  args: ["--no-sandbox"],
-});
+const browser = await chromium.launch(launchOptions);
 const page = await browser.newPage();
 const errors = [];
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
@@ -30,7 +30,15 @@ await page.locator('input[type="password"]').fill("a-strong-pass-123");
 await page.locator('button[type="submit"]').click();
 
 // Registration signs the user in and lands them on the dashboard.
-await page.waitForURL((u) => !u.pathname.includes("register"), { timeout: 15000 });
+try {
+  await page.waitForURL((u) => !u.pathname.includes("register"), { timeout: 15000 });
+} catch {
+  // The timeout itself says nothing useful; the page's own error message does.
+  const message = await page.locator(".alert-error, .field-error").allInnerTexts();
+  console.log(`FAIL registration did not complete: ${message.join(" | ") || "no error shown on the page"}`);
+  await browser.close();
+  process.exit(1);
+}
 check("left the register page", !page.url().includes("register"), true);
 
 // The profile call is the one that carries the new allowance fields.

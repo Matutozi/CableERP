@@ -305,6 +305,91 @@ price itself; enforcing a discount cap on someone who can raise the list price i
 Defaulting to anything but `free` silently rejects legitimate quotes on the day of the upgrade,
 with no one having asked for the change.
 
+### Q27. Why is `factory_price` a separate mixin instead of a field on `CostedItem`?
+**Where:** `catalogue/models.py:FactoryPriced`, mixed into `CableSize` and `Accessory`
+**Decision:** A second abstract base carrying `factory_price` and `factory_price_updated_at`, beside
+`CostedItem` rather than inside it.
+**Reasoning:** `CostedItem` documents an invariant that Q5 depends on — **only `costing.py` writes
+these fields**, which is what makes `manage.py rebuild_costs` safe to run at any time. The factory
+price is typed in by the owner and must never be touched by a rebuild. Putting a hand-edited field
+on that base would make the docstring a lie and invite a future rebuild to clear it.
+The two numbers are also opposites. `last_unit_cost` is what the distributor paid, sits *below* the
+selling price, and is confidential. `factory_price` is what the manufacturer would charge the
+customer buying direct, sits *above* the selling price, and exists to be shown. Keeping them on
+separate bases makes that distinction structural rather than a matter of remembering.
+**Breaks if changed:** A factory price on `CostedItem` is one careless `rebuild_costs` away from
+being wiped, and one wrong field reference away from printing the distributor's buying position on
+a document handed to their customer.
+
+### Q28. Why is the factory price snapshotted onto the quote line, and validated above the sale price?
+**Where:** `quotes/models.py:QuoteLineItem.factory_price`, validated in `quotes/serializers.py`
+**Decision:** The figure is copied onto the line when the quote is written, and a factory price at
+or below the line's own price is rejected.
+**Reasoning:** Snapshotting follows the document rule (Q6): reprinting last month's quote must show
+the customer the discount they were actually offered, not one recomputed from today's figures. A
+saving that changes after the fact is an argument waiting to happen.
+The validation exists because the ordering `cost < sale price < factory price` is what the feature
+means. A factory price below the sale price is never a real discount — it is a stale figure, or
+somebody has typed the purchase cost into the wrong box. Printing the resulting negative saving
+would both look broken and, in the second case, disclose what the distributor paid.
+**Breaks if changed:** Reading the factory price live at print time makes historical quotes
+unreproducible. Dropping the validation lets a mistyped cost reach a customer-facing PDF.
+
+### Q29. Why do endpoint gates and field gates both exist, and why does the field gate fail closed?
+**Where:** `accounts/permissions.py` — `member_can`, `requires`, `HidesRestrictedFields`
+**Decision:** Two mechanisms over one predicate. `requires(feature)` refuses a whole view;
+`HidesRestrictedFields` removes keys from a payload. Both call `member_can`, and the field gate
+hides its fields when the request is absent from the serializer context.
+**Reasoning:** The requirements need both shapes. A salesperson has no business reading the purchase
+ledger at all, so that is an endpoint refusal. But they cannot quote without reading the catalogue,
+so cost has to come out of a response that still succeeds (PRD P6-F5). One mechanism cannot do both
+without either breaking quoting or leaving the ledger open.
+Fields are *dropped* rather than blanked so nothing downstream — a nested serializer, a `.values()`
+call, an export written next year — can reach a value that was never declared.
+**Failing closed** matters because the alternative failed silently. The only callers without a
+request are internal, and a security control that defaults to permissive is one bad wiring away
+from leaking: exactly what happened to `ItemHistorySerializer`, which was instantiated without
+context and would have served a full cost time series to anyone.
+**Breaks if changed:** Repeating the check per view guarantees the next view forgets it. Defaulting
+to permissive turns every missing `context={"request": request}` into a silent disclosure.
+
+### Q30. Why is there a test that walks the URL conf instead of testing each endpoint?
+**Where:** `accounts/test_no_leaks.py`
+**Decision:** One suite enumerates every registered `api/` route, calls each as a member holding
+neither `view_costs` nor `bank_details`, and fails if any response contains a cost key, the cost
+value, or the bank account number.
+**Reasoning:** Gating endpoints one at a time is whack-a-mole — the ninth endpoint added next month
+will not be gated and no existing test will notice, because tests are written alongside the code
+they cover and a new endpoint arrives with tests that assert it *works*, not that it withholds.
+Enumerating inverts that: a new route is covered the day it is registered, by a test nobody has to
+remember. It found two leaks the hand-written list had missed, `/api/profile/` serving the account
+number being the worse one.
+It asserts on the *value* as well as the key, so renaming a field cannot quietly re-open the hole,
+and it asserts that the walk visited something, so a broken URL substitution cannot make every
+check pass by visiting nothing.
+**Breaks if changed:** Dropping it returns the codebase to hoping each new endpoint's author
+remembers a permission class.
+
+### Q31. Why can a quote override the payment account, and why is that gated so tightly?
+**Where:** `quotes/serializers.py` — the payment fields, guarded by `Feature.BANK_DETAILS`
+**Decision:** A quote's `payment_bank_name` / `payment_account_name` / `payment_account_number` may
+be set per quote, defaulting to the business profile. Only members holding `bank_details` may set
+them, and every override writes an audit entry naming the person and the quote.
+**Reasoning:** Sellers genuinely need this — a particular order collected into a particular account,
+a branch's own account, a customer paying a specific way. The fields already existed as snapshots
+(Q6); they were simply unwritable.
+The guard exists because this is the single best fraud route in the product. Someone who can type
+any account number onto a quote can type *their own*, and the customer pays them instead of the
+business. That is the same power the profile's bank fields carry, which is why those need both the
+permission and a password re-check (Q15).
+A password on every quote was rejected: profile changes are rare and permanent, whereas an override
+may be routine, and a control that makes the feature tedious pushes sellers back to writing
+quotations in WhatsApp. So prevention where it is cheap — the permission — and detection where
+prevention would cost too much — the audit entry. An override that is logged and attributable is a
+poor way to steal.
+**Breaks if changed:** Making the fields writable without the permission check hands every
+salesperson a way to redirect customer payments, with the quote PDF making it look official.
+
 ## Part 4 — Configuration and safety
 
 ### Q13. Why does `settings.py` refuse to start without a secret key?

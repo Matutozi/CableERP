@@ -49,6 +49,12 @@ class BusinessProfile(models.Model):
         validators=[MinValueValidator(0), MaxValueValidator(100)],
         help_text="Percentage. Set to 0 if VAT does not apply.",
     )
+    # Distributors who compete on being cheaper than the factory turn this on; others never would.
+    # It only sets the default for new quotes — each quote carries its own copy (Q28).
+    show_factory_price = models.BooleanField(
+        default=False,
+        help_text="Show the manufacturer's direct price on quotes, so customers see what they save.",
+    )
     # How many active stores this business may run. Set by a platform operator in the Django
     # admin, never through the API — see SYSTEM_DESIGN.md Q21. When plans arrive this becomes the
     # per-customer override of the plan's default rather than the only source.
@@ -415,6 +421,9 @@ class AuditLog(models.Model):
     class Action(models.TextChoices):
         PRICE_CHANGED = "price_changed", "Price changed"
         BANK_CHANGED = "bank_changed", "Bank details changed"
+        # A quote sent with a different account than the profile's. Logged because the permission
+        # prevents the obvious abuse and this catches the rest (SYSTEM_DESIGN.md Q31).
+        QUOTE_PAYMENT_OVERRIDE = "quote_payment_override", "Quote payment account overridden"
         QUOTE_CREATED = "quote_created", "Quote created"
         QUOTE_UPDATED = "quote_updated", "Quote edited"
         QUOTE_SENT = "quote_sent", "Quote sent"
@@ -428,7 +437,8 @@ class AuditLog(models.Model):
 
     business = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name="audit_log")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+")
-    action = models.CharField(max_length=20, choices=Action.choices)
+    # 32 rather than 20: action names are descriptive, and the PRD already plans to widen this.
+    action = models.CharField(max_length=32, choices=Action.choices)
     summary = models.CharField(max_length=255)
     reference = models.CharField(max_length=100, blank=True, help_text="Quote reference or catalogue entry.")
     created_at = models.DateTimeField(auto_now_add=True)

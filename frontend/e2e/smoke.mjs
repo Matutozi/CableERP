@@ -8,7 +8,8 @@
  */
 import { chromium } from "playwright";
 
-const BASE = process.env.BASE_URL ?? "http://localhost:5173";
+import { BASE, launchOptions } from "./env.mjs";
+
 const USERNAME = process.env.E2E_USERNAME ?? "acmeoaks";
 const PASSWORD = process.env.E2E_PASSWORD ?? "demo-pass-123";
 
@@ -24,10 +25,7 @@ const money = (text) => Number(text.replace(/[^\d.]/g, ""));
 const naira = (value) =>
   `₦${value.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const browser = await chromium.launch({
-  executablePath: process.env.CHROMIUM_EXECUTABLE || undefined,
-  args: ["--no-sandbox"],
-});
+const browser = await chromium.launch(launchOptions);
 const page = await (
   await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
 ).newPage();

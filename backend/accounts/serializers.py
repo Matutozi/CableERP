@@ -8,7 +8,8 @@ from django.db import transaction
 from PIL import Image
 from rest_framework import serializers
 
-from .models import AuditLog, BusinessProfile, provision_business, record
+from .models import AuditLog, BusinessProfile, Feature, provision_business, record
+from .permissions import HidesRestrictedFields
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -91,7 +92,10 @@ class LoginSerializer(serializers.Serializer):
         return attrs
 
 
-class BusinessProfileSerializer(serializers.ModelSerializer):
+class BusinessProfileSerializer(HidesRestrictedFields, serializers.ModelSerializer):
+    # Where customers send money. Dropping the fields also blocks writing them, which is what
+    # PRD P6-F7 asks for: only the owner changes bank details.
+    restricted_fields = {Feature.BANK_DETAILS: list(BANK_FIELDS)}
     # A path, never an absolute URL: the app and the API share an origin, and an absolute one built from
     # Django's own socket (http://127.0.0.1:8000/...) points a phone at itself.
     logo = serializers.SerializerMethodField()
@@ -117,6 +121,8 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
             "payment_terms",
             "quote_validity",
             "vat_rate",
+            # Writable: this one is the business's own preference, unlike the allowance below.
+            "show_factory_price",
             # Visible so the app can show "2 of 3 stores used", but never writable here: the
             # allowance is the operator's lever, not the customer's (SYSTEM_DESIGN.md Q21).
             "store_limit",

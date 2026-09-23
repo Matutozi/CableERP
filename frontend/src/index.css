@@ -571,3 +571,12 @@ textarea { resize: vertical; line-height: 1.5; }
   .waybill-editor .page-actions { width: 100%; }
   .waybill-editor .page-actions .btn { flex: 1; }
 }
+
+/* Factory price: the manufacturer's direct price, shown beside your own so the customer sees the saving. */
+.factory-toggle { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; margin-bottom: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.factory-toggle input { margin-top: 2px; }
+.factory-toggle span { display: flex; flex-direction: column; gap: 2px; font-weight: 500; }
+.factory-toggle small { font-weight: 400; color: var(--muted); }
+.inline-price-factory .inline-input { color: var(--muted); }
+.quote-factory { color: var(--muted); text-decoration: line-through; }
+.quote-saving { color: #047857; font-weight: 600; }

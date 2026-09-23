@@ -9,7 +9,7 @@ from django.test import SimpleTestCase
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from accounts.models import BusinessProfile
+from accounts.models import AuditLog, BusinessProfile, Membership, provision_business
 from catalogue.models import Accessory, CableSize, CableType
 
 from .models import Quote
@@ -75,7 +75,8 @@ class QuoteApiTests(APITestCase):
             "line_items": [singles_line(), plain_line("RG6 Coaxial", "75000", 4)],
             **overrides,
         }
-        return self.client.post("/api/quotes/", payload, format="json")
+        response = self.client.post("/api/quotes/", payload, format="json")
+        return response
 
     def test_create_computes_totals_and_defaults_vat(self):
         response = self.create_quote(transport_cost="5000")
@@ -510,3 +511,222 @@ class QuoteMarginTests(APITestCase):
         response = self.client.get(f"/api/quotes/{quote.pk}/pdf/")
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(b"72,000", response.content)
+
+
+class QuoteFactoryPriceTests(APITestCase):
+    """The factory comparison on a quote (SYSTEM_DESIGN.md Q28)."""
+
+    def setUp(self):
+        self.user, self.business = make_business("ada")
+        self.client.force_authenticate(self.user)
+        cable_type = CableType.objects.create(business=self.business, name="Singles", unit="coil")
+        self.size = CableSize.objects.create(
+            cable_type=cable_type,
+            size_label="1.5mm",
+            default_price=Decimal("33000"),
+            factory_price=Decimal("40000"),
+        )
+
+    def _create_quote(self, **extra):
+        payload = {
+            "customer_name": "Musa",
+            "staff_name": "Ada",
+            "line_items": [{**singles_line(), "cable_size": self.size.id, "kind": "cable"}],
+            **extra,
+        }
+        response = self.client.post("/api/quotes/", payload, format="json")
+        assert response.status_code == 201, response.data
+        return response
+
+    def test_the_factory_price_is_snapshotted_onto_the_line(self):
+        quote = Quote.objects.get(pk=self._create_quote().data["id"])
+        self.assertEqual(quote.line_items.get().factory_price, Decimal("40000"))
+
+    def test_changing_the_catalogue_afterwards_does_not_move_a_sent_quote(self):
+        """A saving the customer was offered must not be recomputed later."""
+        quote = Quote.objects.get(pk=self._create_quote(status="sent").data["id"])
+        before = quote.total_factory_saving
+
+        self.size.factory_price = Decimal("90000")
+        self.size.save()
+
+        quote.refresh_from_db()
+        self.assertEqual(quote.total_factory_saving, before)
+
+    def test_the_saving_is_the_difference_times_the_quantity(self):
+        quote = Quote.objects.get(pk=self._create_quote().data["id"])
+        line = quote.line_items.get()
+        self.assertEqual(line.total_quantity, Decimal("69"))
+        self.assertEqual(line.factory_amount, Decimal("2760000.00"))
+        self.assertEqual(line.factory_saving, Decimal("483000.00"))
+
+    def test_a_line_without_a_factory_price_reports_nothing_rather_than_zero(self):
+        self.size.factory_price = None
+        self.size.save()
+        quote = Quote.objects.get(pk=self._create_quote().data["id"])
+        line = quote.line_items.get()
+
+        self.assertIsNone(line.factory_price)
+        self.assertIsNone(line.factory_amount)
+        self.assertIsNone(line.factory_saving)
+        self.assertIsNone(quote.total_factory_saving)
+
+    def test_a_free_typed_line_has_no_comparison(self):
+        """Nothing in the catalogue to compare against, so no claim is made."""
+        response = self.client.post(
+            "/api/quotes/",
+            {"customer_name": "Musa", "staff_name": "Ada", "line_items": [plain_line("2.5mm", "5000", 4)]},
+            format="json",
+        )
+        quote = Quote.objects.get(pk=response.data["id"])
+        self.assertIsNone(quote.line_items.get().factory_price)
+
+    def test_a_mixed_quote_totals_only_the_comparable_lines(self):
+        """One uncosted line must not silently drag the whole saving to nothing."""
+        response = self.client.post(
+            "/api/quotes/",
+            {
+                "customer_name": "Musa",
+                "staff_name": "Ada",
+                "line_items": [
+                    {**singles_line(), "cable_size": self.size.id, "kind": "cable"},
+                    plain_line("2.5mm", "5000", 4),
+                ],
+            },
+            format="json",
+        )
+        quote = Quote.objects.get(pk=response.data["id"])
+        self.assertEqual(quote.total_factory_saving, Decimal("483000.00"))
+
+    def test_a_new_quote_inherits_the_business_preference(self):
+        self.business.show_factory_price = True
+        self.business.save()
+        quote = Quote.objects.get(pk=self._create_quote().data["id"])
+        self.assertTrue(quote.show_factory_price)
+
+    def test_changing_the_preference_does_not_alter_an_existing_quote(self):
+        quote = Quote.objects.get(pk=self._create_quote().data["id"])
+        self.assertFalse(quote.show_factory_price)
+
+        self.business.show_factory_price = True
+        self.business.save()
+
+        quote.refresh_from_db()
+        self.assertFalse(quote.show_factory_price)
+
+    def test_the_client_cannot_post_a_factory_price_onto_a_line(self):
+        """It is the catalogue's figure, not the caller's."""
+        response = self.client.post(
+            "/api/quotes/",
+            {
+                "customer_name": "Musa",
+                "staff_name": "Ada",
+                "line_items": [
+                    {**singles_line(), "cable_size": self.size.id, "kind": "cable", "factory_price": "999999"}
+                ],
+            },
+            format="json",
+        )
+        quote = Quote.objects.get(pk=response.data["id"])
+        self.assertEqual(quote.line_items.get().factory_price, Decimal("40000"))
+
+    def test_the_pdf_shows_the_factory_column_only_when_enabled(self):
+        quote = Quote.objects.get(pk=self._create_quote().data["id"])
+
+        off = render_to_string("quotes/quote_pdf.html", {"quote": quote})
+        self.assertNotIn("Factory", off)
+
+        quote.show_factory_price = True
+        quote.save()
+        on = render_to_string("quotes/quote_pdf.html", {"quote": quote})
+        self.assertIn("Factory", on)
+        self.assertIn("You save", on)
+
+    def test_the_pdf_never_shows_cost(self):
+        """The failure this feature could cause: printing what the distributor paid."""
+        CableSize.objects.filter(pk=self.size.pk).update(last_unit_cost=Decimal("25000.0000"))
+        quote = Quote.objects.get(pk=self._create_quote().data["id"])
+        quote.show_factory_price = True
+        quote.save()
+
+        html = render_to_string("quotes/quote_pdf.html", {"quote": quote})
+        self.assertIn("40,000.00", html)
+        self.assertNotIn("25,000", html)
+
+
+class QuotePaymentOverrideTests(APITestCase):
+    """A quote may name its own account, but only for members who may touch bank details (Q31)."""
+
+    def setUp(self):
+        self.owner, self.business = make_business("ada")
+        provision_business(self.business, self.owner)
+        self.seller = User.objects.create_user("emeka", password="a-strong-pass-123")
+        Membership.create_from_template(
+            self.business, self.seller, self.business.role_templates.get(name="Sales"), all_stores=True
+        )
+
+    def _post(self, **extra):
+        return self.client.post(
+            "/api/quotes/",
+            {
+                "customer_name": "Musa",
+                "staff_name": "Ada",
+                "line_items": [plain_line("2.5mm", "5000", 4)],
+                **extra,
+            },
+            format="json",
+        )
+
+    def test_a_quote_defaults_to_the_business_account(self):
+        self.client.force_authenticate(self.owner)
+        quote = Quote.objects.get(pk=self._post().data["id"])
+        self.assertEqual(quote.payment_account_number, "0125277464")
+
+    def test_an_owner_can_name_a_different_account_for_one_order(self):
+        self.client.force_authenticate(self.owner)
+        response = self._post(payment_account_number="9999888877", payment_bank_name="GTBank")
+        quote = Quote.objects.get(pk=response.data["id"])
+
+        self.assertEqual(quote.payment_account_number, "9999888877")
+        self.assertEqual(quote.payment_bank_name, "GTBank")
+        self.business.refresh_from_db()
+        self.assertEqual(self.business.account_number, "0125277464", "the profile must be untouched")
+
+    def test_the_override_is_written_to_the_audit_log(self):
+        """Prevention where it is cheap, detection where it is not."""
+        self.client.force_authenticate(self.owner)
+        self._post(payment_account_number="9999888877")
+
+        entry = self.business.audit_log.filter(action=AuditLog.Action.QUOTE_PAYMENT_OVERRIDE).get()
+        self.assertIn("9999888877", entry.summary)
+        self.assertEqual(entry.user, self.owner)
+
+    def test_using_the_business_account_is_not_logged_as_an_override(self):
+        self.client.force_authenticate(self.owner)
+        self._post()
+        self.assertFalse(self.business.audit_log.filter(action=AuditLog.Action.QUOTE_PAYMENT_OVERRIDE).exists())
+
+    def test_a_salesperson_cannot_redirect_the_payment(self):
+        """The fraud route this guards: a seller putting their own account on a quote."""
+        self.client.force_authenticate(self.seller)
+        response = self._post(payment_account_number="1111111111")
+        quote = Quote.objects.get(pk=response.data["id"])
+
+        self.assertEqual(response.status_code, 201, "the quote still saves; the field is just ignored")
+        self.assertEqual(quote.payment_account_number, "0125277464")
+
+    def test_a_salesperson_still_sees_where_the_customer_should_pay(self):
+        """Read-only, not hidden — otherwise the quote prints no payment box at all."""
+        self.client.force_authenticate(self.seller)
+        response = self._post()
+        self.assertEqual(response.data["payment_account_number"], "0125277464")
+
+    def test_an_override_survives_as_a_snapshot(self):
+        self.client.force_authenticate(self.owner)
+        quote = Quote.objects.get(pk=self._post(payment_account_number="9999888877").data["id"])
+
+        self.business.account_number = "5555555555"
+        self.business.save()
+
+        quote.refresh_from_db()
+        self.assertEqual(quote.payment_account_number, "9999888877")

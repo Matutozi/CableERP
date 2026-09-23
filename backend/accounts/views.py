@@ -11,6 +11,8 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from .models import AuditLog, Feature
+from .permissions import member_can
 from .serializers import (
     AuditLogSerializer,
     BusinessProfileSerializer,
@@ -102,7 +104,13 @@ class ActivityView(generics.ListAPIView):
     serializer_class = AuditLogSerializer
 
     def get_queryset(self):
-        return get_business(self.request).audit_log.select_related("user")[:50]
+        entries = get_business(self.request).audit_log.select_related("user")
+        # A bank-change entry spells out the account number in its summary, so the history is a
+        # back door to the one field the product guards hardest. Hidden rather than the whole log
+        # blocked: quote and price history is exactly what a manager should be able to review.
+        if not member_can(self.request, Feature.BANK_DETAILS):
+            entries = entries.exclude(action=AuditLog.Action.BANK_CHANGED)
+        return entries[:50]
 
 
 class ProfileLogoView(APIView):

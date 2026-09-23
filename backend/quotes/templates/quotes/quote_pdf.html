@@ -46,6 +46,9 @@
   .items .col-price { width: 27mm; }
   .items .col-qty { width: 24mm; }
   .items .col-amount { width: 31mm; }
+  /* The factory figure is context for the price beside it, not a number to read first. */
+  .items .factory { color: #6b7280; text-decoration: line-through; }
+  .totals .saving th, .totals .saving td { color: #047857; font-weight: 600; }
   .items tbody { page-break-inside: avoid; }
   .items .main-row .desc { font-weight: bold; }
   .items .colour-row td { padding-top: 0; padding-bottom: 0.8mm; font-size: 8.8pt; color: #555; }
@@ -111,6 +114,7 @@
       <tr>
         <th class="sn">S/N</th>
         <th>Item Description</th>
+        {% if quote.show_factory_price %}<th class="num col-price">Factory (₦)</th>{% endif %}
         <th class="num col-price">Price (₦)</th>
         <th class="num col-qty">Qty</th>
         <th class="num col-amount">Amount (₦)</th>
@@ -121,6 +125,7 @@
       <tr class="main-row{% if not item.has_colours %} end{% endif %}">
         <td class="sn">{{ forloop.counter }}</td>
         <td class="desc">{{ item.description }}</td>
+        {% if quote.show_factory_price %}<td class="num factory">{{ item.factory_price|naira_or_dash }}</td>{% endif %}
         <td class="num">{{ item.unit_price|naira }}</td>
         <td class="num">{{ item.total_quantity|quantity:item.unit }}</td>
         <td class="num">{{ item.amount|naira }}</td>
@@ -129,6 +134,7 @@
       <tr class="colour-row{% if forloop.last %} end{% endif %}">
         <td></td>
         <td class="desc">{{ entry.colour }}</td>
+        {% if quote.show_factory_price %}<td></td>{% endif %}
         <td></td>
         <td class="num">{{ entry.quantity|quantity }}</td>
         <td></td>
@@ -155,6 +161,9 @@
           <tr><th>VAT{% if quote.vat_percentage %} ({{ quote.vat_percentage|percent }}){% endif %}</th><td>{{ quote.vat_amount|naira_or_dash }}</td></tr>
           <tr><th>Transport</th><td>{{ quote.transport_cost|naira_or_dash }}</td></tr>
           <tr class="grand"><th>Grand Total</th><td>₦{{ quote.grand_total|naira }}</td></tr>
+          {% if quote.show_factory_price and quote.total_factory_saving %}
+          <tr class="saving"><th>You save</th><td>₦{{ quote.total_factory_saving|naira }}</td></tr>
+          {% endif %}
         </table>
       </td>
     </tr>

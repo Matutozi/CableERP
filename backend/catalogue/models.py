@@ -63,6 +63,43 @@ class CostedItem(models.Model):
         return margin.quantize(Decimal("0.01"))
 
 
+class FactoryPriced(models.Model):
+    """What the manufacturer would charge a customer buying direct.
+
+    Deliberately not on `CostedItem`: that base's invariant is that only `purchasing.costing`
+    writes it, which is what makes `rebuild_costs` safe. This field is typed in by the owner and a
+    rebuild must never touch it. See SYSTEM_DESIGN.md Q27.
+
+    The two numbers sit on opposite sides of the selling price:
+
+        last_unit_cost  <  default_price  <  factory_price
+        (what you paid)    (what you sell)   (what they would pay direct)
+        CONFIDENTIAL                         SHOWN WHEN THE TOGGLE IS ON
+    """
+
+    factory_price = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(MAX_PRICE)],
+        help_text="What the manufacturer would charge a customer buying direct. Higher than your price.",
+    )
+    # Manufacturers' prices move and a distributor learns them periodically. A discount claimed
+    # against a stale factory price is one the customer can disprove.
+    factory_price_updated_at = models.DateTimeField(null=True, blank=True, editable=False)
+
+    class Meta:
+        abstract = True
+
+    @property
+    def factory_saving(self):
+        """What a customer saves against going direct, or None when there is nothing to compare."""
+        if self.factory_price is None or not self.default_price:
+            return None
+        return self.factory_price - self.default_price
+
+
 class CableType(models.Model):
     class Unit(models.TextChoices):
         COIL = "coil", "Coil (100m)"
@@ -85,7 +122,7 @@ class CableType(models.Model):
         return self.name
 
 
-class CableSize(CostedItem):
+class CableSize(CostedItem, FactoryPriced):
     cable_type = models.ForeignKey(CableType, on_delete=models.CASCADE, related_name="sizes")
     size_label = models.CharField(max_length=100)
     default_price = models.DecimalField(
@@ -108,7 +145,7 @@ class CableSize(CostedItem):
         return self.cable_type.unit
 
 
-class Accessory(CostedItem):
+class Accessory(CostedItem, FactoryPriced):
     """A non-cable product the seller also quotes: sockets, switches, breakers, conduit, tape…"""
 
     class Unit(models.TextChoices):
