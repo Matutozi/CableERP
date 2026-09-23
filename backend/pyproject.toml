@@ -1,0 +1,44 @@
+# Tooling configuration for the backend. Ruff replaces black, flake8 and isort.
+# Line length is 120: the tree's 95th-percentile line is 103 characters, so this
+# leaves almost every existing line untouched and only reflows genuine outliers.
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["*/migrations/*", "venv", ".venv", "staticfiles"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # import sorting
+    "UP",   # pyupgrade
+    "B",    # bugbear: likely bugs
+    "C4",   # comprehensions
+    "DJ",   # Django-specific
+    "S",    # bandit: security
+    "RUF",  # ruff's own
+]
+ignore = [
+    # Django and DRF declare list/dict class attributes everywhere (Meta.fields,
+    # admin.list_display, viewset.throttle_classes). RUF012 wants ClassVar on all
+    # of them, which is noise against a framework convention: 83 of the first 139
+    # findings were this rule alone.
+    "RUF012",
+    # The catalogue help text uses a real multiplication sign in "100 m × 4".
+    # That is correct typography, not a typo.
+    "RUF001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert, and use hard-coded passwords on purpose.
+"*/tests.py" = ["S101", "S105", "S106"]
+# Settings reads environment and builds paths; bandit's warnings there are noise.
+"config/settings.py" = ["S105"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["accounts", "catalogue", "purchasing", "quotes", "waybills", "config"]
+
+[tool.ruff.format]
+quote-style = "double"
