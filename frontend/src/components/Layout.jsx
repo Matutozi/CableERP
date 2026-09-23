@@ -12,7 +12,12 @@ const NAV = [
 
 function initials(user) {
   const source = user.full_name || user.username || "";
-  return source.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0].toUpperCase()).join("");
+  return source
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0].toUpperCase())
+    .join("");
 }
 
 function screenTitle(pathname) {
@@ -71,7 +76,12 @@ export default function Layout() {
 
       <div className="main-col">
         <header className="mobile-header">
-          <button type="button" className="hamburger" aria-label="Open menu" onClick={() => setDrawerOpen(true)}>
+          <button
+            type="button"
+            className="hamburger"
+            aria-label="Open menu"
+            onClick={() => setDrawerOpen(true)}
+          >
             <span />
             <span />
             <span />

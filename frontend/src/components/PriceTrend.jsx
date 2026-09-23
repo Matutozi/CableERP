@@ -45,8 +45,10 @@ export default function PriceTrend({ history, unit }) {
   const pad = highest === lowest ? Math.max(highest * 0.1, 1) : (highest - lowest) * 0.15;
   const [minV, maxV] = [lowest - pad, highest + pad];
 
-  const x = (point) => PAD.left + ((Date.parse(point.date) - minT) / (maxT - minT || 1)) * (W - PAD.left - PAD.right);
-  const y = (point) => H - PAD.bottom - ((point.value - minV) / (maxV - minV || 1)) * (H - PAD.top - PAD.bottom);
+  const x = (point) =>
+    PAD.left + ((Date.parse(point.date) - minT) / (maxT - minT || 1)) * (W - PAD.left - PAD.right);
+  const y = (point) =>
+    H - PAD.bottom - ((point.value - minV) / (maxV - minV || 1)) * (H - PAD.top - PAD.bottom);
   const path = (points) => points.map((point) => `${x(point).toFixed(1)},${y(point).toFixed(1)}`).join(" ");
 
   const series = [
@@ -61,7 +63,10 @@ export default function PriceTrend({ history, unit }) {
       <div className="trend-legend">
         {series.map((entry) => (
           <span key={entry.key} className="trend-key">
-            <span className="trend-swatch" style={{ background: entry.colour, opacity: entry.dash ? 0.8 : 1 }} />
+            <span
+              className="trend-swatch"
+              style={{ background: entry.colour, opacity: entry.dash ? 0.8 : 1 }}
+            />
             {entry.label}
             <strong>₦{formatNaira(latest(entry.points).value)}</strong>
             {unit && <span className="trend-unit">/{unit}</span>}
@@ -70,22 +75,54 @@ export default function PriceTrend({ history, unit }) {
         ))}
       </div>
 
-      <svg className="trend-chart" viewBox={`0 0 ${W} ${H}`} role="img"
-        aria-label={series.map((entry) => `${entry.label}: ${entry.points.length} points, latest ₦${formatNaira(latest(entry.points).value)}`).join(". ")}>
-        <line x1={PAD.left} y1={H - PAD.bottom} x2={W - PAD.right} y2={H - PAD.bottom} stroke="var(--border)" strokeWidth="1" />
+      <svg
+        className="trend-chart"
+        viewBox={`0 0 ${W} ${H}`}
+        role="img"
+        aria-label={series
+          .map(
+            (entry) =>
+              `${entry.label}: ${entry.points.length} points, latest ₦${formatNaira(latest(entry.points).value)}`,
+          )
+          .join(". ")}
+      >
+        <line
+          x1={PAD.left}
+          y1={H - PAD.bottom}
+          x2={W - PAD.right}
+          y2={H - PAD.bottom}
+          stroke="var(--border)"
+          strokeWidth="1"
+        />
         {series.map((entry) => (
           <g key={entry.key}>
             {entry.points.length > 1 && (
-              <polyline points={path(entry.points)} fill="none" stroke={entry.colour} strokeWidth="1.8"
-                strokeDasharray={entry.dash} strokeLinejoin="round" strokeLinecap="round" />
+              <polyline
+                points={path(entry.points)}
+                fill="none"
+                stroke={entry.colour}
+                strokeWidth="1.8"
+                strokeDasharray={entry.dash}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
             )}
             {entry.points.map((point, index) => (
-              <circle key={`${point.date}-${index}`} cx={x(point)} cy={y(point)} r={index === entry.points.length - 1 ? 3.5 : 2.5}
-                fill={entry.colour} stroke="var(--surface)" strokeWidth="1" />
+              <circle
+                key={`${point.date}-${index}`}
+                cx={x(point)}
+                cy={y(point)}
+                r={index === entry.points.length - 1 ? 3.5 : 2.5}
+                fill={entry.colour}
+                stroke="var(--surface)"
+                strokeWidth="1"
+              />
             ))}
           </g>
         ))}
-        <text x={PAD.left} y={H - 6} fill="var(--muted)" fontSize="9">{formatDate(new Date(minT).toISOString())}</text>
+        <text x={PAD.left} y={H - 6} fill="var(--muted)" fontSize="9">
+          {formatDate(new Date(minT).toISOString())}
+        </text>
         <text x={W - PAD.right} y={H - 6} fill="var(--muted)" fontSize="9" textAnchor="end">
           {formatDate(new Date(maxT).toISOString())}
         </text>

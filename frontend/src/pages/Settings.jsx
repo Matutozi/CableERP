@@ -26,7 +26,8 @@ function LogoField({ label, hint, image, busy, disabled, onUpload, onRemove }) {
   return (
     <div className="logo-field">
       <span className="field-label">{label}</span>
-      <label className={dragging ? "dropzone dragging" : "dropzone"}
+      <label
+        className={dragging ? "dropzone dragging" : "dropzone"}
         onDragOver={(event) => {
           event.preventDefault();
           setDragging(true);
@@ -36,12 +37,18 @@ function LogoField({ label, hint, image, busy, disabled, onUpload, onRemove }) {
           event.preventDefault();
           setDragging(false);
           onUpload(event.dataTransfer.files[0]);
-        }}>
-        <input type="file" accept="image/*" hidden disabled={disabled}
+        }}
+      >
+        <input
+          type="file"
+          accept="image/*"
+          hidden
+          disabled={disabled}
           onChange={(event) => {
             onUpload(event.target.files[0]);
             event.target.value = "";
-          }} />
+          }}
+        />
         <span className="dropzone-thumb">{image && <img src={image} alt={label} />}</span>
         <span>
           <span className="dropzone-title">
@@ -51,7 +58,9 @@ function LogoField({ label, hint, image, busy, disabled, onUpload, onRemove }) {
         </span>
       </label>
       {image && (
-        <button type="button" className="btn-link btn-link-danger" onClick={onRemove} disabled={disabled}>Remove {label.toLowerCase()}</button>
+        <button type="button" className="btn-link btn-link-danger" onClick={onRemove} disabled={disabled}>
+          Remove {label.toLowerCase()}
+        </button>
       )}
     </div>
   );
@@ -79,10 +88,17 @@ export default function Settings() {
 
   const bankChanged = Boolean(form && saved && BANK_FIELDS.some((name) => form[name] !== saved[name]));
 
-  const loadActivity = () => api.listActivity().then(setActivity).catch(() => setActivity([]));
+  const loadActivity = () =>
+    api
+      .listActivity()
+      .then(setActivity)
+      .catch(() => setActivity([]));
 
   useEffect(() => {
-    api.getProfile().then(applyProfile).catch((err) => setError(err.message));
+    api
+      .getProfile()
+      .then(applyProfile)
+      .catch((err) => setError(err.message));
     loadActivity();
   }, []);
 
@@ -103,12 +119,16 @@ export default function Settings() {
 
   function handleSubmit(event) {
     event.preventDefault();
-    run("save", async () => {
-      applyProfile(await api.updateProfile(bankChanged ? { ...form, current_password: password } : form));
-      setPassword("");
-      await refresh(); // the business name is shown in the sidebar
-      loadActivity();
-    }, "Settings saved.");
+    run(
+      "save",
+      async () => {
+        applyProfile(await api.updateProfile(bankChanged ? { ...form, current_password: password } : form));
+        setPassword("");
+        await refresh(); // the business name is shown in the sidebar
+        loadActivity();
+      },
+      "Settings saved.",
+    );
   }
 
   function uploadLogo(file) {
@@ -118,14 +138,27 @@ export default function Settings() {
   const removeLogo = () => run("logo", async () => setLogo((await api.removeLogo()).logo), "Logo removed.");
 
   function uploadBrandLogo(file) {
-    if (file) run("brand", async () => setBrandLogo((await api.uploadBrandLogo(file)).brand_logo), "Manufacturer's logo updated.");
+    if (file)
+      run(
+        "brand",
+        async () => setBrandLogo((await api.uploadBrandLogo(file)).brand_logo),
+        "Manufacturer's logo updated.",
+      );
   }
 
   const removeBrandLogo = () =>
-    run("brand", async () => setBrandLogo((await api.removeBrandLogo()).brand_logo), "Manufacturer's logo removed.");
+    run(
+      "brand",
+      async () => setBrandLogo((await api.removeBrandLogo()).brand_logo),
+      "Manufacturer's logo removed.",
+    );
 
   if (!form) {
-    return <div className="page">{error ? <div className="alert alert-error">{error}</div> : <p className="muted">Loading…</p>}</div>;
+    return (
+      <div className="page">
+        {error ? <div className="alert alert-error">{error}</div> : <p className="muted">Loading…</p>}
+      </div>
+    );
   }
 
   const setField = (name) => (event) => setForm({ ...form, [name]: event.target.value });
@@ -149,12 +182,23 @@ export default function Settings() {
             <input value={form.business_name} onChange={setField("business_name")} required />
           </Field>
           <Field label="Phone" hint="Separate numbers with commas.">
-            <input type="tel" value={form.phone_numbers} onChange={setField("phone_numbers")} placeholder="08179452969, 08033857090" />
+            <input
+              type="tel"
+              value={form.phone_numbers}
+              onChange={setField("phone_numbers")}
+              placeholder="08179452969, 08033857090"
+            />
           </Field>
           <Field label="Address" wide>
             <textarea rows={2} value={form.address} onChange={setField("address")} />
           </Field>
-          <Field label={<>Email <span className="optional">(optional)</span></>}>
+          <Field
+            label={
+              <>
+                Email <span className="optional">(optional)</span>
+              </>
+            }
+          >
             <input type="email" value={form.email} onChange={setField("email")} />
           </Field>
           <Field label="VAT rate (%)" hint="Set to 0 if you don't charge VAT.">
@@ -162,12 +206,24 @@ export default function Settings() {
           </Field>
         </div>
 
-        <LogoField label="Logo" image={logo} busy={busy === "logo"} disabled={!!busy}
+        <LogoField
+          label="Logo"
+          image={logo}
+          busy={busy === "logo"}
+          disabled={!!busy}
           hint="PNG or JPG, up to 2 MB. Shown at the top of your quotes."
-          onUpload={uploadLogo} onRemove={removeLogo} />
-        <LogoField label="Manufacturer's logo" image={brandLogo} busy={busy === "brand"} disabled={!!busy}
+          onUpload={uploadLogo}
+          onRemove={removeLogo}
+        />
+        <LogoField
+          label="Manufacturer's logo"
+          image={brandLogo}
+          busy={busy === "brand"}
+          disabled={!!busy}
           hint="The brand you distribute, e.g. Coleman. Printed beside your logo on quotes and waybills."
-          onUpload={uploadBrandLogo} onRemove={removeBrandLogo} />
+          onUpload={uploadBrandLogo}
+          onRemove={removeBrandLogo}
+        />
       </section>
 
       <section className="panel">
@@ -185,9 +241,17 @@ export default function Settings() {
         </div>
         {bankChanged && (
           <div className="confirm-bank">
-            <Field label="Confirm your password" hint="Bank details decide where your customers send money, so we check it's you.">
-              <input type="password" autoComplete="current-password" value={password} required
-                onChange={(event) => setPassword(event.target.value)} />
+            <Field
+              label="Confirm your password"
+              hint="Bank details decide where your customers send money, so we check it's you."
+            >
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                required
+                onChange={(event) => setPassword(event.target.value)}
+              />
             </Field>
           </div>
         )}
@@ -197,10 +261,18 @@ export default function Settings() {
         <h2 className="panel-title">Quote terms</h2>
         <div className="field-grid wide-cols">
           <Field label="Payment terms">
-            <input value={form.payment_terms} onChange={setField("payment_terms")} placeholder="e.g. 100% down payment" />
+            <input
+              value={form.payment_terms}
+              onChange={setField("payment_terms")}
+              placeholder="e.g. 100% down payment"
+            />
           </Field>
           <Field label="Quotation validity">
-            <input value={form.quote_validity} onChange={setField("quote_validity")} placeholder="e.g. 24 hours from the date of this quotation" />
+            <input
+              value={form.quote_validity}
+              onChange={setField("quote_validity")}
+              placeholder="e.g. 24 hours from the date of this quotation"
+            />
           </Field>
           <Field label="Disclaimer" wide>
             <textarea rows={3} value={form.disclaimer} onChange={setField("disclaimer")} />
@@ -213,16 +285,21 @@ export default function Settings() {
         {activity === null ? (
           <p className="muted small">Loading…</p>
         ) : activity.length === 0 ? (
-          <p className="muted small">Nothing recorded yet. Price changes, bank changes and quotes will appear here.</p>
+          <p className="muted small">
+            Nothing recorded yet. Price changes, bank changes and quotes will appear here.
+          </p>
         ) : (
           <ul className="activity">
             {activity.map((entry) => (
               <li key={entry.id}>
                 <span className="activity-what">
-                  <b>{entry.action_label}</b>{entry.reference ? ` · ${entry.reference}` : ""}
+                  <b>{entry.action_label}</b>
+                  {entry.reference ? ` · ${entry.reference}` : ""}
                   <span className="activity-detail">{entry.summary}</span>
                 </span>
-                <span className="activity-meta">{formatDateTime(entry.created_at)} · {entry.user_name}</span>
+                <span className="activity-meta">
+                  {formatDateTime(entry.created_at)} · {entry.user_name}
+                </span>
               </li>
             ))}
           </ul>
@@ -232,19 +309,26 @@ export default function Settings() {
       <section className="panel">
         <h2 className="panel-title">Security</h2>
         <p className="muted small">
-          Signs you out on every phone and computer, including this one. Use it if a staff phone is lost or a shared
-          computer stayed signed in.
+          Signs you out on every phone and computer, including this one. Use it if a staff phone is lost or a
+          shared computer stayed signed in.
         </p>
-        <button type="button" className="btn btn-secondary mt-8" disabled={!!busy}
+        <button
+          type="button"
+          className="btn btn-secondary mt-8"
+          disabled={!!busy}
           onClick={() => {
-            if (window.confirm("Sign out of all devices? You'll need to sign in again here too.")) signOutEverywhere();
-          }}>
+            if (window.confirm("Sign out of all devices? You'll need to sign in again here too."))
+              signOutEverywhere();
+          }}
+        >
           Sign out of all devices
         </button>
       </section>
 
       <div>
-        <button type="submit" className="btn btn-primary" disabled={!!busy}>{busy === "save" ? "Saving…" : "Save changes"}</button>
+        <button type="submit" className="btn btn-primary" disabled={!!busy}>
+          {busy === "save" ? "Saving…" : "Save changes"}
+        </button>
       </div>
     </form>
   );

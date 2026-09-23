@@ -12,7 +12,10 @@ const UNIT_NAMES = {
   length: ["length", "lengths"],
   set: ["set", "sets"],
 };
-export const CABLE_UNITS = [["coil", "Coil (100m)"], ["metre", "Metre"]];
+export const CABLE_UNITS = [
+  ["coil", "Coil (100m)"],
+  ["metre", "Metre"],
+];
 export const ACCESSORY_UNITS = [
   ["piece", "Piece"],
   ["pack", "Pack"],
@@ -23,7 +26,10 @@ export const ACCESSORY_UNITS = [
   ["metre", "Metre"],
 ];
 // Every unit stock can arrive in: cables are bought by the coil or metre, accessories by the box, pack, roll…
-export const ALL_UNITS = [...CABLE_UNITS, ...ACCESSORY_UNITS.filter(([unit]) => !CABLE_UNITS.some(([c]) => c === unit))];
+export const ALL_UNITS = [
+  ...CABLE_UNITS,
+  ...ACCESSORY_UNITS.filter(([unit]) => !CABLE_UNITS.some(([c]) => c === unit)),
+];
 export const isFractionalUnit = (unit) => unit === "metre";
 
 export function toNumber(value) {

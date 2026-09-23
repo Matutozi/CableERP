@@ -43,6 +43,9 @@ export function AuthProvider({ children }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+// The hook belongs beside the context it reads. Splitting it into its own module would
+// satisfy fast refresh but scatter one small concern across two files for no other gain.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   return useContext(AuthContext);
 }

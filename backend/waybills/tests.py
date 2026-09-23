@@ -36,18 +36,39 @@ class WaybillFromQuoteTests(APITestCase):
         cache.clear()
         self.user, self.business = make_business("ada")
         self.client.force_authenticate(self.user)
-        response = self.client.post("/api/quotes/", {
-            "customer_name": "De'Havilland Const.", "staff_name": "Ada", "vat_percentage": "0",
-            "product_manufacturer": "Coleman Wires and Cables",
-            "line_items": [
-                {"cable_type_name": "Armoured", "size_label": "95mm x 4C", "unit": "metre", "unit_price": "57500",
-                 "colours": [{"colour": "", "quantity": "3"}]},
-                {"cable_type_name": "Singles", "size_label": "1.5mm", "unit": "coil", "unit_price": "33000",
-                 "colours": [{"colour": "Red", "quantity": 30}, {"colour": "Black", "quantity": 25}]},
-                {"kind": "accessory", "item_name": "13A socket", "unit": "piece", "unit_price": "2500",
-                 "colours": [{"colour": "", "quantity": 10}]},
-            ],
-        }, format="json")
+        response = self.client.post(
+            "/api/quotes/",
+            {
+                "customer_name": "De'Havilland Const.",
+                "staff_name": "Ada",
+                "vat_percentage": "0",
+                "product_manufacturer": "Coleman Wires and Cables",
+                "line_items": [
+                    {
+                        "cable_type_name": "Armoured",
+                        "size_label": "95mm x 4C",
+                        "unit": "metre",
+                        "unit_price": "57500",
+                        "colours": [{"colour": "", "quantity": "3"}],
+                    },
+                    {
+                        "cable_type_name": "Singles",
+                        "size_label": "1.5mm",
+                        "unit": "coil",
+                        "unit_price": "33000",
+                        "colours": [{"colour": "Red", "quantity": 30}, {"colour": "Black", "quantity": 25}],
+                    },
+                    {
+                        "kind": "accessory",
+                        "item_name": "13A socket",
+                        "unit": "piece",
+                        "unit_price": "2500",
+                        "colours": [{"colour": "", "quantity": 10}],
+                    },
+                ],
+            },
+            format="json",
+        )
         self.assertEqual(response.status_code, 201, response.data)
         self.quote_id = response.data["id"]
         self.quote_ref = response.data["reference_number"]
@@ -62,7 +83,9 @@ class WaybillFromQuoteTests(APITestCase):
         today = timezone.localdate()
         self.assertEqual(data["reference_number"], f"WB-{today:%Y%m%d}-001")
         self.assertEqual(data["customer_name"], "De'Havilland Const.")
-        self.assertEqual(data["invoice_number"], self.quote_ref, "starts as the quote's reference so they can be matched")
+        self.assertEqual(
+            data["invoice_number"], self.quote_ref, "starts as the quote's reference so they can be matched"
+        )
         self.assertEqual(data["quote_reference"], self.quote_ref)
         self.assertEqual(data["product_manufacturer"], "Coleman Wires and Cables")
         self.assertEqual([item["description"] for item in data["items"]], ["95mm x 4C", "1.5mm", "13A socket"])
@@ -111,10 +134,16 @@ class WaybillFromQuoteTests(APITestCase):
         data = self.create().data
         bad = [dict(item) for item in data["items"]]
         bad[1]["colours"] = [{"colour": "Red", "quantity": "1.5"}]  # half a coil
-        self.assertEqual(self.client.put(f"/api/waybills/{data['id']}/", {**data, "items": bad}, format="json").status_code, 400)
+        self.assertEqual(
+            self.client.put(f"/api/waybills/{data['id']}/", {**data, "items": bad}, format="json").status_code, 400
+        )
         bad[1]["colours"] = [{"colour": "Red", "quantity": "0"}]
-        self.assertEqual(self.client.put(f"/api/waybills/{data['id']}/", {**data, "items": bad}, format="json").status_code, 400)
-        self.assertEqual(self.client.put(f"/api/waybills/{data['id']}/", {**data, "items": []}, format="json").status_code, 400)
+        self.assertEqual(
+            self.client.put(f"/api/waybills/{data['id']}/", {**data, "items": bad}, format="json").status_code, 400
+        )
+        self.assertEqual(
+            self.client.put(f"/api/waybills/{data['id']}/", {**data, "items": []}, format="json").status_code, 400
+        )
 
     def test_a_waybill_cannot_be_dated_in_the_future(self):
         data = self.create().data
@@ -138,7 +167,7 @@ class WaybillFromQuoteTests(APITestCase):
         response = self.client.get(f"/api/waybills/{data['id']}/pdf/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/pdf")
-        self.assertIn(f'{data["reference_number"]}.pdf', response["Content-Disposition"])
+        self.assertIn(f"{data['reference_number']}.pdf", response["Content-Disposition"])
         self.assertTrue(response.content.startswith(b"%PDF"))
 
     def test_changes_are_recorded(self):
@@ -146,8 +175,10 @@ class WaybillFromQuoteTests(APITestCase):
         self.client.put(f"/api/waybills/{data['id']}/", {**data, "branch": "Arepo"}, format="json")
         self.client.delete(f"/api/waybills/{data['id']}/")
         actions = set(AuditLog.objects.values_list("action", flat=True))
-        self.assertTrue({AuditLog.Action.WAYBILL_CREATED, AuditLog.Action.WAYBILL_UPDATED,
-                         AuditLog.Action.WAYBILL_DELETED} <= actions)
+        self.assertTrue(
+            {AuditLog.Action.WAYBILL_CREATED, AuditLog.Action.WAYBILL_UPDATED, AuditLog.Action.WAYBILL_DELETED}
+            <= actions
+        )
 
     def test_another_business_can_neither_convert_nor_see(self):
         waybill_id = self.create().data["id"]
@@ -178,16 +209,33 @@ class BrandLogoTests(APITestCase):
             self.assertTrue(response.data["brand_logo"].startswith("/media/logos/"))
             self.assertIsNone(response.data["logo"], "the business's own logo is a separate image")
 
-            quote = self.client.post("/api/quotes/", {
-                "customer_name": "Dangote", "staff_name": "Ada",
-                "line_items": [{"cable_type_name": "Flex", "size_label": "2.5mm", "unit": "coil",
-                                "unit_price": "90000", "colours": [{"colour": "", "quantity": 1}]}],
-            }, format="json").data
+            quote = self.client.post(
+                "/api/quotes/",
+                {
+                    "customer_name": "Dangote",
+                    "staff_name": "Ada",
+                    "line_items": [
+                        {
+                            "cable_type_name": "Flex",
+                            "size_label": "2.5mm",
+                            "unit": "coil",
+                            "unit_price": "90000",
+                            "colours": [{"colour": "", "quantity": 1}],
+                        }
+                    ],
+                },
+                format="json",
+            ).data
             self.business.refresh_from_db()
-            quote_html = render_to_string("quotes/quote_pdf.html", {
-                "quote": Quote.objects.get(pk=quote["id"]), "business": self.business, "logo_uri": None,
-                "brand_logo_uri": "file:///brand.png",
-            })
+            quote_html = render_to_string(
+                "quotes/quote_pdf.html",
+                {
+                    "quote": Quote.objects.get(pk=quote["id"]),
+                    "business": self.business,
+                    "logo_uri": None,
+                    "brand_logo_uri": "file:///brand.png",
+                },
+            )
             self.assertIn('class="brand-logo"', quote_html)
 
             waybill = self.client.post("/api/waybills/", {"quote": quote["id"]}, format="json").data

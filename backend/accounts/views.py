@@ -15,10 +15,11 @@ from .serializers import (
     AuditLogSerializer,
     BusinessProfileSerializer,
     LoginSerializer,
-    image_upload_serializer,
     RegisterSerializer,
     UserSerializer,
+    image_upload_serializer,
 )
+from .throttling import LoginUsernameThrottle
 from .utils import get_business
 
 
@@ -38,7 +39,10 @@ class LoginView(APIView):
     """CSRF-protected so another site can't sign a visitor into an account of its choosing."""
 
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
+    # Two limits, because they stop different attacks: ScopedRateThrottle caps one
+    # address guessing quickly, LoginUsernameThrottle caps one account being guessed
+    # at from many addresses.
+    throttle_classes = [ScopedRateThrottle, LoginUsernameThrottle]
     throttle_scope = "auth"
 
     def post(self, request):

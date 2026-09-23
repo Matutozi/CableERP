@@ -5,14 +5,20 @@ from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.validators import UnicodeUsernameValidator
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from PIL import Image
 from rest_framework import serializers
 
-from .models import AuditLog, BusinessProfile, naira, record
+from .models import AuditLog, BusinessProfile, record
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
 MAX_LOGO_BYTES = 2 * 1024 * 1024
+# A 2 MB file says nothing about how much memory it becomes once decoded: a mostly
+# blank PNG can compress 30000x30000 into a few hundred kilobytes. WeasyPrint decodes
+# the logo in full on every uncached PDF render, so the pixel count is the figure that
+# actually sizes the box. 3000 a side is far more than any letterhead needs.
+MAX_LOGO_DIMENSION = 3000
 # Where customers are told to send money. Changing these is the one profile edit that needs the password.
 BANK_FIELDS = ("bank_name", "account_name", "account_number")
 
@@ -51,7 +57,7 @@ class RegisterSerializer(serializers.Serializer):
         try:
             validate_password(attrs["password"], user=candidate)
         except DjangoValidationError as error:
-            raise serializers.ValidationError({"password": list(error.messages)})
+            raise serializers.ValidationError({"password": list(error.messages)}) from error
         return attrs
 
     @transaction.atomic
@@ -86,8 +92,9 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
     # Django's own socket (http://127.0.0.1:8000/...) points a phone at itself.
     logo = serializers.SerializerMethodField()
     brand_logo = serializers.SerializerMethodField()
-    current_password = serializers.CharField(write_only=True, required=False, allow_blank=True,
-                                             style={"input_type": "password"})
+    current_password = serializers.CharField(
+        write_only=True, required=False, allow_blank=True, style={"input_type": "password"}
+    )
 
     class Meta:
         model = BusinessProfile
@@ -125,19 +132,20 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
         password = attrs.pop("current_password", "")
         if self.instance and self._changed_bank_fields(attrs):
             if not password:
-                raise serializers.ValidationError(
-                    {"current_password": "Enter your password to change bank details."}
-                )
+                raise serializers.ValidationError({"current_password": "Enter your password to change bank details."})
             if not self.instance.user.check_password(password):
                 raise serializers.ValidationError({"current_password": "That password is not correct."})
         return attrs
 
     def update(self, instance, validated_data):
-        changed = {name: (getattr(instance, name), validated_data[name]) for name in self._changed_bank_fields(validated_data)}
+        changed = {
+            name: (getattr(instance, name), validated_data[name]) for name in self._changed_bank_fields(validated_data)
+        }
         profile = super().update(instance, validated_data)
         if changed:
-            logger.warning("Bank details changed on business %s by user %s: %s",
-                           instance.pk, instance.user_id, ", ".join(changed))
+            logger.warning(
+                "Bank details changed on business %s by user %s: %s", instance.pk, instance.user_id, ", ".join(changed)
+            )
             summary = "; ".join(
                 f"{name.replace('_', ' ')} {old or '—'} → {new}" for name, (old, new) in sorted(changed.items())
             )
@@ -170,8 +178,22 @@ def image_upload_serializer(field):
             extra_kwargs = {field: {"required": True, "allow_null": False}}
 
         def validate(self, attrs):
-            if attrs[field].size > MAX_LOGO_BYTES:
+            upload = attrs[field]
+            if upload.size > MAX_LOGO_BYTES:
                 raise serializers.ValidationError({field: "Logo must be 2 MB or smaller."})
+            # Image.open reads the header only; it does not decode the pixels, so probing
+            # the dimensions of a decompression bomb is itself cheap.
+            try:
+                with Image.open(upload) as probe:
+                    width, height = probe.size
+            except (OSError, ValueError) as error:
+                raise serializers.ValidationError({field: "That file is not an image we can read."}) from error
+            finally:
+                upload.seek(0)
+            if max(width, height) > MAX_LOGO_DIMENSION:
+                raise serializers.ValidationError(
+                    {field: f"Logo must be {MAX_LOGO_DIMENSION} pixels or smaller on each side."}
+                )
             return attrs
 
     return ImageUploadSerializer

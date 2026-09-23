@@ -42,8 +42,13 @@ class WaybillViewSet(viewsets.ModelViewSet):
         return {**super().get_serializer_context(), "business": get_business(self.request)}
 
     def _record(self, waybill, action):
-        record(waybill.business, self.request.user, action,
-               f"{waybill.customer_name} · {len(waybill.items.all())} items", reference=waybill.reference_number)
+        record(
+            waybill.business,
+            self.request.user,
+            action,
+            f"{waybill.customer_name} · {len(waybill.items.all())} items",
+            reference=waybill.reference_number,
+        )
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -51,8 +56,9 @@ class WaybillViewSet(viewsets.ModelViewSet):
         waybill = Waybill.from_quote(serializer.validated_data["quote"], request.user)
         waybill = self.get_queryset().get(pk=waybill.pk)
         self._record(waybill, AuditLog.Action.WAYBILL_CREATED)
-        return Response(WaybillSerializer(waybill, context=self.get_serializer_context()).data,
-                        status=status.HTTP_201_CREATED)
+        return Response(
+            WaybillSerializer(waybill, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED
+        )
 
     def perform_update(self, serializer):
         self._record(serializer.save(), AuditLog.Action.WAYBILL_UPDATED)

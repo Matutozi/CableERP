@@ -5,7 +5,15 @@ import Icon from "./Icon.jsx";
  * A picker that opens its full list on tap and still accepts anything typed — the catalogue is a
  * starting point, not a limit. Used for cable types, sizes and accessories on a quote line.
  */
-export default function Combobox({ value, options, placeholder, ariaLabel, autoFocus, emptyMessage, onChange }) {
+export default function Combobox({
+  value,
+  options,
+  placeholder,
+  ariaLabel,
+  autoFocus,
+  emptyMessage,
+  onChange,
+}) {
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(-1);
   const wrapper = useRef(null);
@@ -14,7 +22,8 @@ export default function Combobox({ value, options, placeholder, ariaLabel, autoF
   const typed = value.trim().toLowerCase();
   const exact = options.some((option) => option.value.toLowerCase() === typed);
   // Once the text matches an option, show everything again so another one can be picked.
-  const visible = !typed || exact ? options : options.filter((option) => option.value.toLowerCase().includes(typed));
+  const visible =
+    !typed || exact ? options : options.filter((option) => option.value.toLowerCase().includes(typed));
 
   useEffect(() => {
     if (!open) return undefined;

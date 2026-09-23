@@ -7,13 +7,13 @@ export const DEFAULT_COLOURS = ["Red", "Black", "Yellow/Green"];
 const same = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 export const findCableType = (cableTypes, name) =>
-  name?.trim() ? cableTypes.find((type) => same(type.name, name)) ?? null : null;
+  name?.trim() ? (cableTypes.find((type) => same(type.name, name)) ?? null) : null;
 
 export const findSize = (cableType, label) =>
-  cableType && label?.trim() ? cableType.sizes.find((size) => same(size.size_label, label)) ?? null : null;
+  cableType && label?.trim() ? (cableType.sizes.find((size) => same(size.size_label, label)) ?? null) : null;
 
 export const findAccessory = (accessories, name) =>
-  name?.trim() ? accessories.find((accessory) => same(accessory.name, name)) ?? null : null;
+  name?.trim() ? (accessories.find((accessory) => same(accessory.name, name)) ?? null) : null;
 
 /**
  * Colour rows a cable card shows: the catalogue type's colours (or the default set for a cable that
@@ -58,7 +58,8 @@ export function quoteTotals(items, vatPercentage, transportCost) {
  * this copy only keeps the running figures honest while the seller is still typing.
  */
 export function unitCostFor(item, cableType, accessories) {
-  const row = item.kind === "cable" ? findSize(cableType, item.size_label) : findAccessory(accessories, item.item_name);
+  const row =
+    item.kind === "cable" ? findSize(cableType, item.size_label) : findAccessory(accessories, item.item_name);
   return row?.last_unit_cost ?? null;
 }
 
@@ -70,10 +71,20 @@ export function unitCostFor(item, cableType, accessories) {
 export function marginTotals(items, subtotal) {
   const costed = items.filter((item) => item.unitCost !== null && item.unitCost !== undefined);
   if (!costed.length) {
-    return { known: false, cost: 0, margin: 0, percentage: null, costedItems: 0, totalItems: items.length, valueShare: 0 };
+    return {
+      known: false,
+      cost: 0,
+      margin: 0,
+      percentage: null,
+      costedItems: 0,
+      totalItems: items.length,
+      valueShare: 0,
+    };
   }
   const revenue = round2(costed.reduce((sum, item) => sum + lineTotals(item).amount, 0));
-  const cost = round2(costed.reduce((sum, item) => sum + lineTotals(item).quantity * toNumber(item.unitCost), 0));
+  const cost = round2(
+    costed.reduce((sum, item) => sum + lineTotals(item).quantity * toNumber(item.unitCost), 0),
+  );
   return {
     known: true,
     cost,

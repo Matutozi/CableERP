@@ -12,7 +12,8 @@ export default function WaybillList() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.listWaybills()
+    api
+      .listWaybills()
       .then((page) => {
         setWaybills(page.results);
         setCount(page.count);
@@ -40,7 +41,9 @@ export default function WaybillList() {
       <div className="page-head">
         <div>
           <h1>Waybills</h1>
-          <div className="page-sub">{waybills === null ? " " : `${count} ${count === 1 ? "waybill" : "waybills"}`}</div>
+          <div className="page-sub">
+            {waybills === null ? " " : `${count} ${count === 1 ? "waybill" : "waybills"}`}
+          </div>
         </div>
       </div>
       <DocumentTabs />
@@ -51,7 +54,8 @@ export default function WaybillList() {
         !error && <p className="muted">Loading…</p>
       ) : waybills.length === 0 ? (
         <div className="empty">
-          No waybills yet. Open a quote's preview and tap <strong>Create waybill</strong> when the goods go out.
+          No waybills yet. Open a quote's preview and tap <strong>Create waybill</strong> when the goods go
+          out.
         </div>
       ) : (
         <>
@@ -61,7 +65,8 @@ export default function WaybillList() {
                 <span className="waybill-main">
                   <span className="waybill-customer">{waybill.customer_name}</span>
                   <span className="waybill-sub">
-                    {formatDate(waybill.date)} · {waybill.item_count} {waybill.item_count === 1 ? "item" : "items"}
+                    {formatDate(waybill.date)} · {waybill.item_count}{" "}
+                    {waybill.item_count === 1 ? "item" : "items"}
                     {waybill.quote_reference && ` · from ${waybill.quote_reference}`}
                   </span>
                 </span>

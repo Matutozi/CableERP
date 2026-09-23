@@ -12,9 +12,15 @@ export default function CatalogueHeader({ action }) {
         {action}
       </div>
       <nav className="tabs" aria-label="Catalogue sections">
-        <NavLink to="/catalogue" end className="tab">Cables</NavLink>
-        <NavLink to="/catalogue/accessories" className="tab">Accessories</NavLink>
-        <NavLink to="/catalogue/purchases" className="tab">Purchases</NavLink>
+        <NavLink to="/catalogue" end className="tab">
+          Cables
+        </NavLink>
+        <NavLink to="/catalogue/accessories" className="tab">
+          Accessories
+        </NavLink>
+        <NavLink to="/catalogue/purchases" className="tab">
+          Purchases
+        </NavLink>
       </nav>
     </>
   );

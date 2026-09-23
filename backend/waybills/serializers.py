@@ -45,8 +45,19 @@ class WaybillItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = WaybillItem
         fields = [
-            "id", "kind", "cable_size", "accessory", "cable_type_name", "size_label", "item_name",
-            "unit", "order", "colours", "model_label", "description", "total_quantity",
+            "id",
+            "kind",
+            "cable_size",
+            "accessory",
+            "cable_type_name",
+            "size_label",
+            "item_name",
+            "unit",
+            "order",
+            "colours",
+            "model_label",
+            "description",
+            "total_quantity",
         ]
         read_only_fields = ["id", "order"]
 
@@ -64,7 +75,9 @@ class WaybillItemSerializer(serializers.ModelSerializer):
         if len(names) != len(set(names)):
             raise serializers.ValidationError({"colours": "Each colour can only be listed once."})
         if attrs["unit"] not in FRACTIONAL_UNITS and any(entry["quantity"] % 1 for entry in colours):
-            raise serializers.ValidationError({"colours": f"{attrs['unit'].capitalize()} quantities must be whole numbers."})
+            raise serializers.ValidationError(
+                {"colours": f"{attrs['unit'].capitalize()} quantities must be whole numbers."}
+            )
         return attrs
 
 
@@ -77,9 +90,22 @@ class WaybillSerializer(serializers.ModelSerializer):
     class Meta:
         model = Waybill
         fields = [
-            "id", "reference_number", "quote", "quote_reference", "date", "customer_name", "invoice_number",
-            "branch", "vehicle_number", "product_manufacturer", "notes", "items", "colour_columns", "totals",
-            "created_at", "updated_at",
+            "id",
+            "reference_number",
+            "quote",
+            "quote_reference",
+            "date",
+            "customer_name",
+            "invoice_number",
+            "branch",
+            "vehicle_number",
+            "product_manufacturer",
+            "notes",
+            "items",
+            "colour_columns",
+            "totals",
+            "created_at",
+            "updated_at",
         ]
         read_only_fields = ["reference_number", "quote", "created_at", "updated_at"]
 
@@ -123,4 +149,13 @@ class WaybillListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Waybill
-        fields = ["id", "reference_number", "date", "customer_name", "quote", "quote_reference", "item_count", "created_at"]
+        fields = [
+            "id",
+            "reference_number",
+            "date",
+            "customer_name",
+            "quote",
+            "quote_reference",
+            "item_count",
+            "created_at",
+        ]

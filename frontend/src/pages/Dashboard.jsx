@@ -38,7 +38,9 @@ function Movement({ item }) {
             <span className="trend-delta flat">first buy</span>
           ) : (
             // Cost going up is the bad direction, so it is the one shown in red.
-            <span className={change > 0 ? "trend-delta up" : change < 0 ? "trend-delta down" : "trend-delta flat"}>
+            <span
+              className={change > 0 ? "trend-delta up" : change < 0 ? "trend-delta down" : "trend-delta flat"}
+            >
               {change > 0 ? "▲" : change < 0 ? "▼" : ""} {Math.abs(Math.round(change * 10) / 10)}%
             </span>
           )}
@@ -78,21 +80,28 @@ export default function Dashboard() {
   }, []);
 
   const firstName = user.full_name?.split(" ")[0];
-  const setupIncomplete = profile && (!profile.phone_numbers || !profile.bank_name || !profile.account_number);
+  const setupIncomplete =
+    profile && (!profile.phone_numbers || !profile.bank_name || !profile.account_number);
 
   return (
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>{greeting()}{firstName ? `, ${firstName}` : ""}</h1>
+          <h1>
+            {greeting()}
+            {firstName ? `, ${firstName}` : ""}
+          </h1>
           <div className="page-sub">{user.business_name}</div>
         </div>
-        <Link to="/quotes/new" className="btn btn-primary">New quote</Link>
+        <Link to="/quotes/new" className="btn btn-primary">
+          New quote
+        </Link>
       </div>
 
       {setupIncomplete && (
         <div className="alert alert-info">
-          Add your phone numbers and bank details so they appear on your quotes. <Link to="/settings">Finish setup →</Link>
+          Add your phone numbers and bank details so they appear on your quotes.{" "}
+          <Link to="/settings">Finish setup →</Link>
         </div>
       )}
       {error && <div className="alert alert-error">{error}</div>}
@@ -101,17 +110,25 @@ export default function Dashboard() {
         <>
           <div className="section-head">
             <h2>Price movements</h2>
-            <Link to="/catalogue/purchases" className="small">Record a purchase</Link>
+            <Link to="/catalogue/purchases" className="small">
+              Record a purchase
+            </Link>
           </div>
           <div className="panel flush movements">
-            {movements.map((item) => <Movement key={`${item.kind}-${item.id}`} item={item} />)}
+            {movements.map((item) => (
+              <Movement key={`${item.kind}-${item.id}`} item={item} />
+            ))}
           </div>
         </>
       )}
 
       <div className="section-head">
         <h2>Recent quotes</h2>
-        {quotes?.length > 0 && <Link to="/quotes" className="small">View all</Link>}
+        {quotes?.length > 0 && (
+          <Link to="/quotes" className="small">
+            View all
+          </Link>
+        )}
       </div>
       {quotes === null ? (
         !error && <p className="muted">Loading…</p>

@@ -29,9 +29,7 @@ def env_list(name, default):
 DEBUG = env_bool("DJANGO_DEBUG", False)
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY") or ("django-insecure-dev-only" if DEBUG else "")
 if not SECRET_KEY:
-    raise ImproperlyConfigured(
-        "Set DJANGO_SECRET_KEY (see README.md), or DJANGO_DEBUG=true for local work."
-    )
+    raise ImproperlyConfigured("Set DJANGO_SECRET_KEY (see README.md), or DJANGO_DEBUG=true for local work.")
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
 # Move the admin somewhere unguessable in production (L3).
 ADMIN_URL = os.environ.get("DJANGO_ADMIN_URL", "admin").strip("/") + "/"
@@ -117,9 +115,10 @@ REST_FRAMEWORK = {
     # Throttles use Django's cache. The default local-memory cache counts per process,
     # so give the deployment a shared cache (Redis) once it runs more than one worker.
     "DEFAULT_THROTTLE_RATES": {
-        "auth": "10/min",      # sign-in attempts, per IP
+        "auth": "10/min",  # sign-in attempts, per IP
+        "login_username": "5/min",  # sign-in attempts against one account, from any address
         "register": "20/hour",  # new accounts, per IP
-        "pdf": "60/hour",      # PDF renders, per user
+        "pdf": "60/hour",  # PDF renders, per user
     },
 }
 

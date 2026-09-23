@@ -21,9 +21,7 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
     # Both units default to however this item was bought last time, so a repeat delivery is
     # just a quantity and a price.
     entry_unit = serializers.CharField(required=False)
-    units_per_entry = serializers.DecimalField(
-        max_digits=12, decimal_places=2, max_value=MAX_QUANTITY, required=False
-    )
+    units_per_entry = serializers.DecimalField(max_digits=12, decimal_places=2, max_value=MAX_QUANTITY, required=False)
     unit_cost = serializers.DecimalField(**COST_FIELD)
     landed_unit_cost = serializers.DecimalField(max_digits=17, decimal_places=4, read_only=True)
     sale_quantity = serializers.DecimalField(**TOTAL_FIELD)
@@ -58,7 +56,11 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
         row = attrs.get("cable_size") or attrs.get("accessory")
         if not row:
             raise serializers.ValidationError(
-                {"cable_size": "Pick the catalogue item this stock is for. Add it to your catalogue first if it is new."}
+                {
+                    "cable_size": (
+                        "Pick the catalogue item this stock is for. Add it to your catalogue first if it is new."
+                    )
+                }
             )
         if attrs.get("cable_size") and attrs.get("accessory"):
             raise serializers.ValidationError({"accessory": "A line is either a cable or an accessory, not both."})
@@ -139,7 +141,7 @@ class PurchaseSerializer(serializers.ModelSerializer):
 
         lines = [(item["quantity"] * item["unit_cost"], item["quantity"] * item["units_per_entry"]) for item in items]
         landed = landed_unit_costs(lines, attrs.get("additional_cost", Decimal("0")))
-        for item, value in zip(items, landed):
+        for item, value in zip(items, landed, strict=True):
             if out_of_range(value):
                 # Raised without a field name so the app shows the sentence as written, the way
                 # the locked-quote message does.

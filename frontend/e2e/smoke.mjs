@@ -21,13 +21,16 @@ function check(label, actual, expected) {
 }
 
 const money = (text) => Number(text.replace(/[^\d.]/g, ""));
-const naira = (value) => `₦${value.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const naira = (value) =>
+  `₦${value.toLocaleString("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_EXECUTABLE || undefined,
   args: ["--no-sandbox"],
 });
-const page = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })).newPage();
+const page = await (
+  await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+).newPage();
 page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
 page.on("console", (message) => message.type() === "error" && problems.push(`console: ${message.text()}`));
 
@@ -58,7 +61,11 @@ try {
   await page.getByRole("button", { name: "Generate PDF" }).click();
   await page.waitForURL(/\/quotes\/\d+\/preview$/);
   await page.getByText("QUOTATION", { exact: true }).waitFor();
-  check("grand total the server printed", await page.locator(".doc-grand span").last().innerText(), naira(expected));
+  check(
+    "grand total the server printed",
+    await page.locator(".doc-grand span").last().innerText(),
+    naira(expected),
+  );
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),

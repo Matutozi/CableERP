@@ -39,7 +39,12 @@ const dotColour = (name) => DOT_COLOURS[name.trim().toLowerCase()] ?? "#A3A3A3";
 
 /** "Red", "Black", "Yellow/Green" -> "R", "B", "Y/G"; falls back to full names if two would clash. */
 function shortNames(names) {
-  const short = names.map((name) => name.split("/").map((part) => part.trim()[0]?.toUpperCase() ?? "").join("/"));
+  const short = names.map((name) =>
+    name
+      .split("/")
+      .map((part) => part.trim()[0]?.toUpperCase() ?? "")
+      .join("/"),
+  );
   return new Set(short).size === short.length ? short : names;
 }
 
@@ -49,7 +54,18 @@ const onlyAmount = (text) => text.replace(/[^\d.]/g, "");
  * One editable quote line, per the prototype's "cards" layout: type or pick a cable (then size) or an
  * accessory from the catalogue; anything not in the catalogue is quoted exactly as typed.
  */
-export default function LineItemCard({ item, cableTypes, accessories, unitCost, error, autoFocus, adding, onChange, onRemove, onAddToCatalogue }) {
+export default function LineItemCard({
+  item,
+  cableTypes,
+  accessories,
+  unitCost,
+  error,
+  autoFocus,
+  adding,
+  onChange,
+  onRemove,
+  onAddToCatalogue,
+}) {
   const isCable = item.kind === "cable";
   const cableType = isCable ? findCableType(cableTypes, item.cable_type_name) : null;
   const accessory = isCable ? null : findAccessory(accessories, item.item_name);
@@ -62,10 +78,14 @@ export default function LineItemCard({ item, cableTypes, accessories, unitCost, 
     : Boolean(item.item_name.trim() && !accessory);
   const colourNames = colourNamesFor(item, cableType);
   const labels = shortNames(colourNames);
-  const { quantity, amount } = lineTotals({ unit_price: item.unit_price, colours: coloursFor(item, cableType) });
+  const { quantity, amount } = lineTotals({
+    unit_price: item.unit_price,
+    colours: coloursFor(item, cableType),
+  });
   const qtyMode = isFractionalUnit(item.unit) ? "decimal" : "numeric";
   // Margin only when a purchase has been recorded for this item: an unknown cost stays unknown.
-  const margin = unitCost === null || unitCost === undefined ? null : round2(amount - quantity * toNumber(unitCost));
+  const margin =
+    unitCost === null || unitCost === undefined ? null : round2(amount - quantity * toNumber(unitCost));
 
   const setQuantity = (colour) => (event) =>
     onChange({ quantities: { ...item.quantities, [colour]: onlyAmount(event.target.value) } });
@@ -88,19 +108,30 @@ export default function LineItemCard({ item, cableTypes, accessories, unitCost, 
 
   function pickSize(value) {
     const size = findSize(cableType, value);
-    onChange({ size_label: value, cable_size: size?.id ?? null, ...(size && { unit_price: String(toNumber(size.default_price)) }) });
+    onChange({
+      size_label: value,
+      cable_size: size?.id ?? null,
+      ...(size && { unit_price: String(toNumber(size.default_price)) }),
+    });
   }
 
   function pickAccessory(value) {
     const match = findAccessory(accessories, value);
     if (!match) return onChange({ item_name: value, accessory: null });
-    onChange({ item_name: match.name, accessory: match.id, unit: match.unit, unit_price: String(toNumber(match.default_price)) });
+    onChange({
+      item_name: match.name,
+      accessory: match.id,
+      unit: match.unit,
+      unit_price: String(toNumber(match.default_price)),
+    });
   }
 
   function toggleByColour(event) {
-    onChange(event.target.checked
-      ? { quoteByColour: true }
-      : { quoteByColour: false, quantities: { "": item.quantities[""] ?? "" } });
+    onChange(
+      event.target.checked
+        ? { quoteByColour: true }
+        : { quoteByColour: false, quantities: { "": item.quantities[""] ?? "" } },
+    );
   }
 
   return (
@@ -109,29 +140,44 @@ export default function LineItemCard({ item, cableTypes, accessories, unitCost, 
         <div className="item-row">
           <div className="grow">
             <span className="field-label">Cable type</span>
-            <Combobox value={item.cable_type_name} ariaLabel="Cable type" placeholder="Pick or type a cable"
-              autoFocus={autoFocus} onChange={pickCableType}
+            <Combobox
+              value={item.cable_type_name}
+              ariaLabel="Cable type"
+              placeholder="Pick or type a cable"
+              autoFocus={autoFocus}
+              onChange={pickCableType}
               options={cableTypes.map((type) => ({
                 value: type.name,
                 hint: `${type.sizes.length} ${type.sizes.length === 1 ? "size" : "sizes"} · per ${unitLabel(type.unit, 1)}`,
-              }))} />
+              }))}
+            />
           </div>
           <div className="w-size">
             <span className="field-label">Size</span>
-            <Combobox value={item.size_label} ariaLabel="Size" placeholder="Size" onChange={pickSize}
-              options={(cableType?.sizes ?? []).map((size) => ({ value: size.size_label }))} />
+            <Combobox
+              value={item.size_label}
+              ariaLabel="Size"
+              placeholder="Size"
+              onChange={pickSize}
+              options={(cableType?.sizes ?? []).map((size) => ({ value: size.size_label }))}
+            />
           </div>
         </div>
       ) : (
         <div className="item-row">
           <div className="grow">
             <span className="field-label">Accessory</span>
-            <Combobox value={item.item_name} ariaLabel="Accessory" placeholder="Pick or type an accessory"
-              autoFocus={autoFocus} onChange={pickAccessory}
+            <Combobox
+              value={item.item_name}
+              ariaLabel="Accessory"
+              placeholder="Pick or type an accessory"
+              autoFocus={autoFocus}
+              onChange={pickAccessory}
               options={accessories.map((accessory) => ({
                 value: accessory.name,
                 hint: `₦${formatNaira(accessory.default_price)} / ${unitLabel(accessory.unit, 1)}`,
-              }))} />
+              }))}
+            />
           </div>
         </div>
       )}
@@ -142,7 +188,9 @@ export default function LineItemCard({ item, cableTypes, accessories, unitCost, 
             <span>Sold per</span>
             <select value={item.unit} onChange={(event) => onChange({ unit: event.target.value })}>
               {(isCable ? CABLE_UNITS : ACCESSORY_UNITS).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
+                <option key={value} value={value}>
+                  {label}
+                </option>
               ))}
             </select>
           </label>
@@ -162,10 +210,17 @@ export default function LineItemCard({ item, cableTypes, accessories, unitCost, 
               ? "Not in your catalogue — quoted as typed."
               : `New size for ${cableType.name} — quoted as typed.`}
           </span>
-          <button type="button" className="btn-link" disabled={adding || item.unit_price === ""}
-            title={item.unit_price === "" ? "Enter a unit price first" : "Save it with this price for next time"}
-            onClick={onAddToCatalogue}>
-            <Icon name="plus" size={14} strokeWidth={1.7} />{adding ? "Adding…" : "Add to catalogue"}
+          <button
+            type="button"
+            className="btn-link"
+            disabled={adding || item.unit_price === ""}
+            title={
+              item.unit_price === "" ? "Enter a unit price first" : "Save it with this price for next time"
+            }
+            onClick={onAddToCatalogue}
+          >
+            <Icon name="plus" size={14} strokeWidth={1.7} />
+            {adding ? "Adding…" : "Add to catalogue"}
           </button>
         </div>
       )}
@@ -173,12 +228,22 @@ export default function LineItemCard({ item, cableTypes, accessories, unitCost, 
       <div className="item-row">
         <label className="w-price">
           <span className="field-label">Unit price</span>
-          <MoneyInput value={item.unit_price} placeholder="₦0.00" onChange={(value) => onChange({ unit_price: value })} />
+          <MoneyInput
+            value={item.unit_price}
+            placeholder="₦0.00"
+            onChange={(value) => onChange({ unit_price: value })}
+          />
         </label>
         {colourNames.length === 0 && (
           <label className="w-qty">
             <span className="field-label">Qty ({unitLabel(item.unit)})</span>
-            <input type="text" inputMode={qtyMode} value={item.quantities[""] ?? ""} placeholder="0" onChange={setQuantity("")} />
+            <input
+              type="text"
+              inputMode={qtyMode}
+              value={item.quantities[""] ?? ""}
+              placeholder="0"
+              onChange={setQuantity("")}
+            />
           </label>
         )}
       </div>
@@ -191,8 +256,14 @@ export default function LineItemCard({ item, cableTypes, accessories, unitCost, 
               <label key={colour} className="colour-input" title={colour}>
                 <span className="dot" style={{ background: dotColour(colour) }} />
                 <span className="colour-abbr">{labels[index]}</span>
-                <input type="text" inputMode={qtyMode} value={item.quantities[colour] ?? ""} placeholder="0"
-                  aria-label={`${colour} quantity`} onChange={setQuantity(colour)} />
+                <input
+                  type="text"
+                  inputMode={qtyMode}
+                  value={item.quantities[colour] ?? ""}
+                  placeholder="0"
+                  aria-label={`${colour} quantity`}
+                  onChange={setQuantity(colour)}
+                />
               </label>
             ))}
           </div>
@@ -202,15 +273,26 @@ export default function LineItemCard({ item, cableTypes, accessories, unitCost, 
       {error && <div className="item-error">{error}</div>}
 
       <div className="item-foot">
-        <button type="button" className="icon-btn icon-btn-danger" onClick={onRemove} title="Remove item" aria-label="Remove item">
+        <button
+          type="button"
+          className="icon-btn icon-btn-danger"
+          onClick={onRemove}
+          title="Remove item"
+          aria-label="Remove item"
+        >
           <Icon name="trash" size={15} />
         </button>
         <div className="item-sum">
-          <span className="item-qty">{formatQty(quantity)} {unitLabel(item.unit, quantity)}</span>
+          <span className="item-qty">
+            {formatQty(quantity)} {unitLabel(item.unit, quantity)}
+          </span>
           {margin !== null && amount > 0 && (
-            <span className={margin < 0 ? "item-margin loss" : "item-margin"}
-              title={`Costs ₦${formatNaira(quantity * toNumber(unitCost))} at your last purchase price`}>
-              {margin < 0 ? "−" : "+"}₦{formatNaira(Math.abs(margin))} · {formatPercent((margin / amount) * 100)}
+            <span
+              className={margin < 0 ? "item-margin loss" : "item-margin"}
+              title={`Costs ₦${formatNaira(quantity * toNumber(unitCost))} at your last purchase price`}
+            >
+              {margin < 0 ? "−" : "+"}₦{formatNaira(Math.abs(margin))} ·{" "}
+              {formatPercent((margin / amount) * 100)}
             </span>
           )}
           <span className="item-total">₦{formatNaira(amount)}</span>

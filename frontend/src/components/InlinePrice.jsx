@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toNumber } from "../services/format.js";
 import MoneyInput from "./MoneyInput.jsx";
 
@@ -6,8 +6,14 @@ import MoneyInput from "./MoneyInput.jsx";
 export default function InlinePrice({ price, label, onSave }) {
   const [value, setValue] = useState(String(toNumber(price)));
   const [state, setState] = useState("idle"); // idle | saving | saved
+  const [lastPrice, setLastPrice] = useState(price);
 
-  useEffect(() => setValue(String(toNumber(price))), [price]);
+  // The catalogue price can change underneath this field: a save elsewhere, or a reload.
+  // Resyncing during render rather than in an effect keeps it to a single render pass.
+  if (lastPrice !== price) {
+    setLastPrice(price);
+    setValue(String(toNumber(price)));
+  }
 
   async function commit() {
     if (value === "" || toNumber(value) === toNumber(price)) {
@@ -27,14 +33,20 @@ export default function InlinePrice({ price, label, onSave }) {
 
   return (
     <span className="inline-price">
-      <MoneyInput className="inline-input" value={value} aria-label={label}
+      <MoneyInput
+        className="inline-input"
+        value={value}
+        aria-label={label}
         onChange={(next) => {
           setValue(next);
           setState("idle");
         }}
         onBlur={commit}
-        onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()} />
-      <span className={`save-state ${state}`} aria-live="polite">{state === "saved" ? "✓" : state === "saving" ? "…" : ""}</span>
+        onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()}
+      />
+      <span className={`save-state ${state}`} aria-live="polite">
+        {state === "saved" ? "✓" : state === "saving" ? "…" : ""}
+      </span>
     </span>
   );
 }
