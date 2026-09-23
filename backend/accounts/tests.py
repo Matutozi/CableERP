@@ -1,18 +1,22 @@
 import io
 import tempfile
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.test import override_settings
+from django.db.utils import IntegrityError
+from django.test import RequestFactory, override_settings
 from PIL import Image
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.test import APIClient, APITestCase
 
 from catalogue.models import CableSize, CableType
 
-from .models import BusinessProfile
+from .models import ROLE_PRESETS, BusinessProfile, Feature, Membership, Role
 from .serializers import MAX_LOGO_BYTES, MAX_LOGO_DIMENSION
+from .utils import CURRENT_BUSINESS_SESSION_KEY, get_business, get_membership, require
 
 User = get_user_model()
 PASSWORD = "a-strong-pass-123"
@@ -314,3 +318,129 @@ class SeedDataTests(APITestCase):
         call_command("seed_data", reset_prices=True, stdout=io.StringIO())
         size.refresh_from_db()
         self.assertEqual(size.default_price, 33000)
+
+
+class MembershipTests(APITestCase):
+    """The spine: one person's access to one business (SYSTEM_DESIGN.md Q19, Q20)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("ada", password=PASSWORD)
+        self.business = BusinessProfile.objects.create(user=self.user, business_name="Ada Cables")
+
+    def test_a_role_preset_is_copied_not_referenced(self):
+        """The property Q19 exists for: widening a preset must not widen existing members.
+
+        This is the whole reason permissions are stored. If access were resolved from the role
+        name at request time, every manager on the platform would silently gain whatever a future
+        release adds to the preset.
+        """
+        member = Membership.create_with_role(self.business, self.user, Role.MANAGER)
+        self.assertNotIn(Feature.BANK_DETAILS, member.permissions)
+
+        with patch.dict(ROLE_PRESETS, {Role.MANAGER: frozenset(Feature.values)}):
+            member.refresh_from_db()
+            self.assertFalse(member.has(Feature.BANK_DETAILS))
+
+    def test_the_manager_preset_withholds_bank_details_and_member_management(self):
+        member = Membership.create_with_role(self.business, self.user, Role.MANAGER)
+        self.assertTrue(member.has(Feature.QUOTES))
+        self.assertTrue(member.has(Feature.VIEW_COSTS))
+        self.assertFalse(member.has(Feature.BANK_DETAILS))
+        self.assertFalse(member.has(Feature.MANAGE_MEMBERS))
+
+    def test_the_sales_preset_cannot_see_cost(self):
+        """PRD P6-F5: cost and margin are hidden from sales everywhere."""
+        member = Membership.create_with_role(self.business, self.user, Role.SALES)
+        self.assertTrue(member.has(Feature.QUOTES))
+        self.assertFalse(member.has(Feature.VIEW_COSTS))
+        self.assertFalse(member.has(Feature.PURCHASES))
+
+    def test_suspension_withholds_access_without_erasing_it(self):
+        """PRD P6-F4: suspend without deleting, so history keeps naming them."""
+        member = Membership.create_with_role(self.business, self.user, Role.OWNER)
+        member.status = Membership.Status.SUSPENDED
+        member.save()
+
+        self.assertFalse(member.has(Feature.QUOTES))
+        self.assertIn(Feature.QUOTES, member.permissions)
+
+    def test_a_business_can_have_two_owners(self):
+        """PRD P6-F2b — impossible under the one-to-one this replaces."""
+        second = User.objects.create_user("bola", password=PASSWORD)
+        Membership.create_with_role(self.business, self.user, Role.OWNER)
+        Membership.create_with_role(self.business, second, Role.OWNER)
+        self.assertEqual(self.business.memberships.filter(role=Role.OWNER).count(), 2)
+
+    def test_one_person_cannot_hold_two_memberships_of_one_business(self):
+        Membership.create_with_role(self.business, self.user, Role.OWNER)
+        with self.assertRaises(IntegrityError):
+            Membership.create_with_role(self.business, self.user, Role.SALES)
+
+    def test_a_user_can_belong_to_several_businesses(self):
+        """PRD P6-F9."""
+        other_owner = User.objects.create_user("chidi", password=PASSWORD)
+        other = BusinessProfile.objects.create(user=other_owner, business_name="Chidi Cables")
+        Membership.create_with_role(self.business, self.user, Role.OWNER)
+        Membership.create_with_role(other, self.user, Role.SALES)
+        self.assertEqual(self.user.memberships.count(), 2)
+
+    def test_set_permissions_discards_anything_that_is_not_a_feature(self):
+        member = Membership.create_with_role(self.business, self.user, Role.SALES)
+        member.set_permissions([Feature.QUOTES, "not_a_feature", Feature.REPORTS])
+        self.assertEqual(member.permissions, sorted([Feature.QUOTES, Feature.REPORTS]))
+
+
+class TenantResolutionTests(APITestCase):
+    """get_business() must not lock anyone out mid-migration (SYSTEM_DESIGN.md Q20)."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.user = User.objects.create_user("ada", password=PASSWORD)
+        self.business = BusinessProfile.objects.create(user=self.user, business_name="Ada Cables")
+
+    def _request(self, session=None):
+        request = self.factory.get("/")
+        request.user = self.user
+        request.session = session if session is not None else {}
+        return request
+
+    def test_a_user_with_no_membership_row_still_reaches_their_business(self):
+        """The fallback. Without it, an incomplete backfill locks an owner out of their own data."""
+        self.assertIsNone(get_membership(self._request()))
+        self.assertEqual(get_business(self._request()), self.business)
+
+    def test_a_membership_takes_precedence_over_the_legacy_link(self):
+        Membership.create_with_role(self.business, self.user, Role.OWNER)
+        self.assertEqual(get_business(self._request()), self.business)
+
+    def test_a_suspended_membership_does_not_resolve(self):
+        member = Membership.create_with_role(self.business, self.user, Role.OWNER)
+        member.status = Membership.Status.SUSPENDED
+        member.save()
+        self.assertIsNone(get_membership(self._request()))
+
+    def test_the_session_chooses_between_several_businesses(self):
+        other_owner = User.objects.create_user("chidi", password=PASSWORD)
+        other = BusinessProfile.objects.create(user=other_owner, business_name="Chidi Cables")
+        Membership.create_with_role(self.business, self.user, Role.OWNER)
+        Membership.create_with_role(other, self.user, Role.SALES)
+
+        # Two memberships and no choice made: ambiguous, so neither is assumed.
+        self.assertIsNone(get_membership(self._request()))
+
+        chosen = get_membership(self._request({CURRENT_BUSINESS_SESSION_KEY: other.pk}))
+        self.assertEqual(chosen.business, other)
+
+    def test_a_stale_session_id_falls_through_instead_of_failing(self):
+        Membership.create_with_role(self.business, self.user, Role.OWNER)
+        membership = get_membership(self._request({CURRENT_BUSINESS_SESSION_KEY: 9999}))
+        self.assertEqual(membership.business, self.business)
+
+    def test_require_allows_a_legacy_user_everything(self):
+        require(self._request(), Feature.BANK_DETAILS)
+
+    def test_require_refuses_a_feature_the_member_does_not_hold(self):
+        Membership.create_with_role(self.business, self.user, Role.SALES)
+        require(self._request(), Feature.QUOTES)
+        with self.assertRaises(PermissionDenied):
+            require(self._request(), Feature.BANK_DETAILS)
