@@ -72,6 +72,34 @@ signed in but may not do this". DRF conflates both as 403 when no `WWW-Authentic
 **Breaks if changed:** `AuthContext` can no longer detect expiry, and users get a permission error
 instead of a sign-in prompt.
 
+### Q19. Why does `Membership` carry a stored permission set instead of a role the code looks up?
+**Where:** `accounts/models.py:Membership` *(being built — D1)*
+**Decision:** A role is a **preset that fills a permission set at write time**. The granted
+permissions are stored on the membership row; the role name is a label recording which preset was
+used, and is never consulted when deciding access.
+**Reasoning:** PRD P6-F2 requires that changing a preset later must not retroactively grant access
+to existing members. If `role == "manager"` were evaluated live, then widening the manager preset in
+a future release would silently hand every existing manager the new capability — a privilege
+escalation shipped as a feature. Storing the set means an existing member keeps exactly what they
+were granted, and an owner who wants them to have more must grant it deliberately. It also satisfies
+P6-F2a: per-feature access at invite time is just a different starting set, not a different
+mechanism.
+**Breaks if changed:** Resolving permissions from the role name at request time makes every preset
+edit a retroactive, silent grant across every business on the platform, with no audit trail showing
+who gained what.
+
+### Q20. Why does `get_business()` keep working during the membership migration?
+**Where:** `accounts/utils.py:get_business()`
+**Decision:** The helper resolves a membership first and falls back to the legacy
+`user.business_profile` one-to-one while both exist.
+**Reasoning:** Every viewset in every app scopes through this one function (Q2), which is what makes
+the tenancy change cheap — but it also means a breaking change here breaks all of them at once. A
+fallback lets the `Membership` rows be created and backfilled in one deploy, and the one-to-one
+removed in a later one, with the app serving traffic throughout.
+**Breaks if changed:** Cutting over in a single step means any user whose membership row failed to
+backfill is locked out of their own data with a `PermissionDenied`, and the only way back is a
+restore.
+
 ---
 
 ## Part 2 — The money rules
@@ -205,6 +233,43 @@ entry make it neither silent nor deniable.
 itself when the page is opened on a phone. The image silently fails to load.
 **Breaks if changed:** Logos break on every device that is not the machine running the server.
 
+### Q17. Why throttle logins per username as well as per IP, and why not lock accounts?
+**Where:** `accounts/throttling.py:LoginUsernameThrottle`, `accounts/views.py:LoginView`,
+`config/settings.py` (`login_username`, 5/min)
+**Decision:** Two throttles on the sign-in endpoint. `ScopedRateThrottle` keys on the
+address, `LoginUsernameThrottle` keys on the lowercased username being attempted.
+**Reasoning:** The two limits stop opposite attacks. Per-IP caps one address guessing
+quickly; it does nothing about credential stuffing spread thin across many addresses
+against one account, which is the shape an attacker with a botnet actually uses.
+Keying on the username closes that.
+
+A lockout was considered and rejected. Disabling an account after N failures hands an
+attacker a denial-of-service primitive: anyone who knows a username can keep its owner
+out indefinitely. A throttle costs the attacker far more than the real user and cannot
+be turned against them.
+
+The key is lowercased because registration matches usernames case-insensitively —
+otherwise `ADA` would be a second free bucket for the same account.
+**Breaks if changed:** Dropping the per-username limit reopens distributed guessing.
+Note also that throttle counters live in Django's cache, so a multi-worker deployment
+without `REDIS_URL` multiplies every limit by the worker count.
+
+### Q18. Why cap logo pixel dimensions when there is already a 2 MB byte limit?
+**Where:** `accounts/serializers.py` (`MAX_LOGO_DIMENSION`, `image_upload_serializer`)
+**Decision:** Reject uploads longer than 3000 pixels on either side, in addition to the
+byte cap.
+**Reasoning:** File size tells you nothing about decoded size. A single-colour PNG at
+30000x30000 compresses to a few hundred kilobytes and passes a 2 MB check comfortably,
+then becomes gigabytes of pixels in memory. WeasyPrint decodes the logo in full on every
+uncached PDF render, and PDF rendering is already the memory ceiling that sizes the
+server — so the pixel count, not the byte count, is the figure that matters.
+
+`Image.open()` reads the header without decoding pixels, so probing the dimensions of a
+decompression bomb is itself cheap. The file is rewound afterwards so the upload still
+saves normally.
+**Breaks if changed:** Removing the cap lets one upload exhaust memory on the next PDF
+render, taking the whole instance down for every tenant on it.
+
 ---
 
 ## Open decisions
@@ -219,3 +284,4 @@ lands, and delete it from here.
 | D3 | Stores: is cost shared across branches or held per store? | Decision pending — per-store recommended |
 | D4 | Product verticals: does a non-cable catalogue import existing models or define new ones? | Blocked on an answer |
 | D5 | Suspension semantics: what exactly can a restricted business still do? | Reads yes, writes no, PDFs yes — proposed |
+| D6 | Deployment: uploads move to S3-compatible object storage, so `BusinessProfileSerializer` must return absolute signed URLs there while keeping relative paths locally (amends Q16) | Designed, not built — see `DEPLOYMENT.md` §3–4 |

@@ -364,4 +364,3 @@ swap, packages, nginx and certbot to no purpose.
 6. `LogoutEverywhereView` checks every live session, so its cost grows with the total number of sessions. That is fine at the current scale.
 7. `TESTING = "test" in sys.argv` is fragile: any command with "test" among its arguments turns the production security settings off. This is the one on this list worth fixing first — it is a security control that disables itself on an argument string, and the fix is to key off an explicit environment variable instead.
 8. **`average_unit_cost` is computed, stored and never read.** `snapshot_costs` only ever uses `last_unit_cost`, so `cost_basis` has exactly one value in practice (`COST_BASIS_LAST`). Either weighted-average margin is planned — in which case this is scaffolding and the discriminator earns its place — or it is a column and a rebuild path being maintained for nothing. Decide before Phase 4 reporting is built on top of it.
-
