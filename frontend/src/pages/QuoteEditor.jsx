@@ -7,8 +7,23 @@ import MoneyInput from "../components/MoneyInput.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import useMediaQuery from "../hooks/useMediaQuery.js";
 import { api } from "../services/api.js";
-import { formatDate, formatNaira, formatPercent, isFractionalUnit, todayIso, toNumber, unitLabel } from "../services/format.js";
-import { DEFAULT_COLOURS, coloursFor, findCableType, marginTotals, quoteTotals, unitCostFor } from "../services/quoteMath.js";
+import {
+  formatDate,
+  formatNaira,
+  formatPercent,
+  isFractionalUnit,
+  todayIso,
+  toNumber,
+  unitLabel,
+} from "../services/format.js";
+import {
+  DEFAULT_COLOURS,
+  coloursFor,
+  findCableType,
+  marginTotals,
+  quoteTotals,
+  unitCostFor,
+} from "../services/quoteMath.js";
 
 const BLANK_FIELDS = {
   customer_name: "",
@@ -24,7 +39,11 @@ const BLANK_FIELDS = {
 
 function pickFields(quote) {
   const fields = Object.fromEntries(Object.keys(BLANK_FIELDS).map((key) => [key, quote[key] ?? ""]));
-  return { ...fields, transport_cost: String(toNumber(quote.transport_cost)), vat_percentage: String(toNumber(quote.vat_percentage)) };
+  return {
+    ...fields,
+    transport_cost: String(toNumber(quote.transport_cost)),
+    vat_percentage: String(toNumber(quote.vat_percentage)),
+  };
 }
 
 let nextKey = 1;
@@ -58,20 +77,24 @@ function fromLineItem(line) {
     unit: line.unit,
     unit_price: String(toNumber(line.unit_price)),
     quoteByColour: line.colours.some((entry) => entry.colour),
-    quantities: Object.fromEntries(line.colours.map((entry) => [entry.colour, String(toNumber(entry.quantity))])),
+    quantities: Object.fromEntries(
+      line.colours.map((entry) => [entry.colour, String(toNumber(entry.quantity))]),
+    ),
   };
 }
 
 function itemProblem(item) {
   const name = item.kind === "cable" ? item.cable_type_name : item.item_name;
-  if (!name.trim()) return item.kind === "cable" ? "Enter or pick a cable type." : "Enter or pick an accessory.";
+  if (!name.trim())
+    return item.kind === "cable" ? "Enter or pick a cable type." : "Enter or pick an accessory.";
   if (item.unit_price === "") return "Enter a unit price.";
   if (!item.colours.length) return "Enter a quantity.";
   const quantities = item.colours.map((entry) => toNumber(entry.quantity));
   if (!isFractionalUnit(item.unit) && quantities.some((qty) => !Number.isInteger(qty))) {
     return `Quantities in ${unitLabel(item.unit)} must be whole numbers.`;
   }
-  if (quantities.some((qty) => Math.abs(qty * 100 - Math.round(qty * 100)) > 1e-9)) return "Use at most two decimal places.";
+  if (quantities.some((qty) => Math.abs(qty * 100 - Math.round(qty * 100)) > 1e-9))
+    return "Use at most two decimal places.";
   return null;
 }
 
@@ -100,7 +123,12 @@ function QuoteEditor({ quoteId }) {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.listCableTypes(), api.listAccessories(), api.getProfile(), quoteId ? api.getQuote(quoteId) : null])
+    Promise.all([
+      api.listCableTypes(),
+      api.listAccessories(),
+      api.getProfile(),
+      quoteId ? api.getQuote(quoteId) : null,
+    ])
       .then(([types, accessoryList, profile, quote]) => {
         if (cancelled) return;
         setCableTypes(types);
@@ -108,7 +136,12 @@ function QuoteEditor({ quoteId }) {
         if (quote) {
           applySaved(quote);
         } else {
-          setFields({ ...BLANK_FIELDS, date: todayIso(), staff_name: user.full_name ?? "", vat_percentage: String(toNumber(profile.vat_rate)) });
+          setFields({
+            ...BLANK_FIELDS,
+            date: todayIso(),
+            staff_name: user.full_name ?? "",
+            vat_percentage: String(toNumber(profile.vat_rate)),
+          });
           setItems([blankItem("cable")]);
         }
       })
@@ -126,7 +159,11 @@ function QuoteEditor({ quoteId }) {
   }
 
   if (!fields) {
-    return <div className="page">{error ? <div className="alert alert-error">{error}</div> : <p className="muted">Loading…</p>}</div>;
+    return (
+      <div className="page">
+        {error ? <div className="alert alert-error">{error}</div> : <p className="muted">Loading…</p>}
+      </div>
+    );
   }
 
   const resolved = items.map((item) => {
@@ -160,12 +197,15 @@ function QuoteEditor({ quoteId }) {
   }
 
   async function save() {
-    const problems = Object.fromEntries(resolved.map((item) => [item.key, itemProblem(item)]).filter(([, problem]) => problem));
+    const problems = Object.fromEntries(
+      resolved.map((item) => [item.key, itemProblem(item)]).filter(([, problem]) => problem),
+    );
     setItemErrors(problems);
     if (!fields.customer_name.trim()) throw new Error("Enter the customer's name.");
     if (!fields.staff_name.trim()) throw new Error("Enter who prepared the quote.");
     if (!items.length) throw new Error("Add at least one item.");
-    if (Object.keys(problems).length) throw new Error("Some items need attention. See the highlighted cards.");
+    if (Object.keys(problems).length)
+      throw new Error("Some items need attention. See the highlighted cards.");
 
     const payload = {
       ...fields,
@@ -227,7 +267,11 @@ function QuoteEditor({ quoteId }) {
     const price = toNumber(item.unit_price).toFixed(2);
     try {
       if (item.kind === "accessory") {
-        const created = await api.createAccessory({ name: item.item_name.trim(), unit: item.unit, default_price: price });
+        const created = await api.createAccessory({
+          name: item.item_name.trim(),
+          unit: item.unit,
+          default_price: price,
+        });
         setAccessories((current) => [...current, created]);
         updateItem(item.key, { accessory: created.id, item_name: created.name });
         setNotice(`${created.name} added to your accessories at ₦${formatNaira(created.default_price)}.`);
@@ -244,11 +288,20 @@ function QuoteEditor({ quoteId }) {
         });
         types = [...cableTypes, cableType];
       }
-      const size = await api.createSize(cableType.id, { size_label: item.size_label.trim(), default_price: price });
+      const size = await api.createSize(cableType.id, {
+        size_label: item.size_label.trim(),
+        default_price: price,
+      });
       const withSize = { ...cableType, sizes: [...(cableType.sizes ?? []), size] };
       setCableTypes(types.map((entry) => (entry.id === withSize.id ? withSize : entry)));
-      updateItem(item.key, { cable_size: size.id, cable_type_name: cableType.name, size_label: size.size_label });
-      setNotice(`${size.size_label} ${cableType.name} added to your catalogue at ₦${formatNaira(size.default_price)}.`);
+      updateItem(item.key, {
+        cable_size: size.id,
+        cable_type_name: cableType.name,
+        size_label: size.size_label,
+      });
+      setNotice(
+        `${size.size_label} ${cableType.name} added to your catalogue at ₦${formatNaira(size.default_price)}.`,
+      );
     } catch (err) {
       setError(err.message);
     } finally {
@@ -262,7 +315,9 @@ function QuoteEditor({ quoteId }) {
     try {
       const revision = await api.reviseQuote(saved.id);
       navigate(`/quotes/${revision.id}`, {
-        state: { notice: `${revision.reference_number} is a revision of ${saved.reference_number}. Edit and send it as usual.` },
+        state: {
+          notice: `${revision.reference_number} is a revision of ${saved.reference_number}. Edit and send it as usual.`,
+        },
       });
     } catch (err) {
       setError(err.message);
@@ -283,7 +338,9 @@ function QuoteEditor({ quoteId }) {
 
   const actionButtons = locked ? (
     <>
-      <Link className="btn btn-secondary" to={`/quotes/${saved.id}/preview`}>Open preview</Link>
+      <Link className="btn btn-secondary" to={`/quotes/${saved.id}/preview`}>
+        Open preview
+      </Link>
       <button type="button" className="btn btn-primary" onClick={handleRevise} disabled={!!busy}>
         {busy === "revise" ? "Creating…" : "Create revision"}
       </button>
@@ -309,28 +366,44 @@ function QuoteEditor({ quoteId }) {
       <div className="t-row">
         <label className="t-vat">
           VAT
-          <input className="mini-input vat-input" inputMode="decimal" value={fields.vat_percentage} aria-label="VAT percentage"
+          <input
+            className="mini-input vat-input"
+            inputMode="decimal"
+            value={fields.vat_percentage}
+            aria-label="VAT percentage"
             disabled={locked}
-            onChange={(event) => setFields({ ...fields, vat_percentage: event.target.value.replace(/[^\d.]/g, "") })} />
+            onChange={(event) =>
+              setFields({ ...fields, vat_percentage: event.target.value.replace(/[^\d.]/g, "") })
+            }
+          />
           %
         </label>
         <span className="num">{totals.vat ? `₦${formatNaira(totals.vat)}` : "–"}</span>
       </div>
       <div className="t-row">
         <span>Transport</span>
-        <MoneyInput className="mini-input" value={fields.transport_cost} aria-label="Transport cost" disabled={locked}
-          onChange={(value) => setFields({ ...fields, transport_cost: value })} />
+        <MoneyInput
+          className="mini-input"
+          value={fields.transport_cost}
+          aria-label="Transport cost"
+          disabled={locked}
+          onChange={(value) => setFields({ ...fields, transport_cost: value })}
+        />
       </div>
       {margin.known && (
         <div className={margin.margin < 0 ? "t-row t-margin loss" : "t-row t-margin"}>
           <span>
             Margin
             {margin.costedItems < margin.totalItems && (
-              <span className="t-coverage"> on {margin.costedItems} of {margin.totalItems}</span>
+              <span className="t-coverage">
+                {" "}
+                on {margin.costedItems} of {margin.totalItems}
+              </span>
             )}
           </span>
           <span className="num">
-            {margin.margin < 0 ? "−" : ""}₦{formatNaira(Math.abs(margin.margin))} · {formatPercent(margin.percentage)}
+            {margin.margin < 0 ? "−" : ""}₦{formatNaira(Math.abs(margin.margin))} ·{" "}
+            {formatPercent(margin.percentage)}
           </span>
         </div>
       )}
@@ -344,7 +417,8 @@ function QuoteEditor({ quoteId }) {
           <div>
             <h1>{saved ? saved.reference_number : "New quote"}</h1>
             <div className="page-sub">
-              {fields.status === "sent" ? "Sent" : "Draft"} · {saved ? `Created ${formatDate(saved.created_at)}` : "Not saved yet"}
+              {fields.status === "sent" ? "Sent" : "Draft"} ·{" "}
+              {saved ? `Created ${formatDate(saved.created_at)}` : "Not saved yet"}
               {saved?.revision_of_reference && ` · Revision of ${saved.revision_of_reference}`}
             </div>
           </div>
@@ -355,8 +429,8 @@ function QuoteEditor({ quoteId }) {
         {notice && <div className="alert alert-success">{notice}</div>}
         {locked && (
           <div className="alert alert-info">
-            Sent{saved.sent_at ? ` on ${formatDate(saved.sent_at)}` : ""}. This is the record of what the customer
-            received, so it can't be changed — create a revision to quote them again.
+            Sent{saved.sent_at ? ` on ${formatDate(saved.sent_at)}` : ""}. This is the record of what the
+            customer received, so it can't be changed — create a revision to quote them again.
           </div>
         )}
 
@@ -364,7 +438,11 @@ function QuoteEditor({ quoteId }) {
           <section className="panel">
             <div className="field-grid">
               <Field label="Customer">
-                <input value={fields.customer_name} onChange={setField("customer_name")} placeholder="Customer name" />
+                <input
+                  value={fields.customer_name}
+                  onChange={setField("customer_name")}
+                  placeholder="Customer name"
+                />
               </Field>
               <Field label="Prepared by">
                 <input value={fields.staff_name} onChange={setField("staff_name")} />
@@ -372,14 +450,30 @@ function QuoteEditor({ quoteId }) {
               <Field label="Date">
                 <input type="date" value={fields.date} onChange={setField("date")} />
               </Field>
-              <Field label={<>Manufacturer <span className="optional">(optional)</span></>}>
-                <input value={fields.product_manufacturer} onChange={setField("product_manufacturer")} placeholder="e.g. Coleman Wires and Cables" />
+              <Field
+                label={
+                  <>
+                    Manufacturer <span className="optional">(optional)</span>
+                  </>
+                }
+              >
+                <input
+                  value={fields.product_manufacturer}
+                  onChange={setField("product_manufacturer")}
+                  placeholder="e.g. Coleman Wires and Cables"
+                />
               </Field>
             </div>
             <details className="more">
               <summary>More details</summary>
               <div className="field-grid">
-                <Field label={<>Staff phone <span className="optional">(optional)</span></>}>
+                <Field
+                  label={
+                    <>
+                      Staff phone <span className="optional">(optional)</span>
+                    </>
+                  }
+                >
                   <input type="tel" value={fields.staff_phone} onChange={setField("staff_phone")} />
                 </Field>
                 <Field label="Status">
@@ -388,20 +482,30 @@ function QuoteEditor({ quoteId }) {
                     <option value="sent">Sent</option>
                   </select>
                 </Field>
-                <Field label={<>Notes <span className="optional">(printed at the bottom)</span></>} wide>
+                <Field
+                  label={
+                    <>
+                      Notes <span className="optional">(printed at the bottom)</span>
+                    </>
+                  }
+                  wide
+                >
                   <textarea rows={2} value={fields.notes} onChange={setField("notes")} />
                 </Field>
               </div>
               {saved && (
-                <button type="button" className="btn-link btn-link-danger" onClick={handleDelete}>Delete this quote</button>
+                <button type="button" className="btn-link btn-link-danger" onClick={handleDelete}>
+                  Delete this quote
+                </button>
               )}
             </details>
           </section>
 
-
           <div className="section-head">
             <h2>Items</h2>
-            <span className="muted small">{items.length} {items.length === 1 ? "item" : "items"}</span>
+            <span className="muted small">
+              {items.length} {items.length === 1 ? "item" : "items"}
+            </span>
           </div>
 
           {items.length === 0 ? (
@@ -409,23 +513,31 @@ function QuoteEditor({ quoteId }) {
           ) : (
             <div className="item-list">
               {resolved.map((item) => (
-                <LineItemCard key={item.key} item={item} cableTypes={cableTypes} accessories={accessories}
+                <LineItemCard
+                  key={item.key}
+                  item={item}
+                  cableTypes={cableTypes}
+                  accessories={accessories}
                   unitCost={item.unitCost}
-                  error={itemErrors[item.key]} autoFocus={item.key === focusKey}
+                  error={itemErrors[item.key]}
+                  autoFocus={item.key === focusKey}
                   adding={busy === `catalogue-${item.key}`}
                   onChange={(patch) => updateItem(item.key, patch)}
                   onAddToCatalogue={() => addToCatalogue(item)}
-                  onRemove={() => setItems((current) => current.filter((entry) => entry.key !== item.key))} />
+                  onRemove={() => setItems((current) => current.filter((entry) => entry.key !== item.key))}
+                />
               ))}
             </div>
           )}
 
           <div className="add-row">
             <button type="button" className="btn-link" onClick={() => addItem("cable")}>
-              <Icon name="plus" size={15} strokeWidth={1.7} />Add cable
+              <Icon name="plus" size={15} strokeWidth={1.7} />
+              Add cable
             </button>
             <button type="button" className="btn-link" onClick={() => addItem("accessory")}>
-              <Icon name="plus" size={15} strokeWidth={1.7} />Add accessory
+              <Icon name="plus" size={15} strokeWidth={1.7} />
+              Add accessory
             </button>
           </div>
 

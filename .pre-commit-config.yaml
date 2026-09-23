@@ -1,0 +1,46 @@
+# Catch formatting and lint problems before they reach CI.
+#   pip install pre-commit && pre-commit install
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.patch$
+      - id: end-of-file-fixer
+        exclude: \.patch$
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.8
+    hooks:
+      - id: ruff-check
+        args: ["--fix"]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier (frontend)
+        # pre-commit hands over paths relative to the repo root, so this must run
+        # from the root too. Prettier finds frontend/.prettierrc.json by walking up
+        # from each file; index.css is excluded here rather than via .prettierignore,
+        # which prettier would resolve against the wrong directory.
+        entry: frontend/node_modules/.bin/prettier --write
+        language: system
+        files: ^frontend/(src|e2e)/.*\.(js|jsx|mjs|css|json)$
+        exclude: ^frontend/src/index\.css$
+      - id: eslint
+        name: eslint (frontend)
+        entry: bash -c 'cd frontend && npx eslint .'
+        language: system
+        files: ^frontend/(src|e2e)/
+        pass_filenames: false

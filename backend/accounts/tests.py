@@ -12,6 +12,7 @@ from rest_framework.test import APIClient, APITestCase
 from catalogue.models import CableSize, CableType
 
 from .models import BusinessProfile
+from .serializers import MAX_LOGO_BYTES, MAX_LOGO_DIMENSION
 
 User = get_user_model()
 PASSWORD = "a-strong-pass-123"
@@ -49,8 +50,12 @@ class AuthTests(APITestCase):
         self.assertEqual(blocked.status_code, 403)
 
         strict.get("/api/auth/me/")  # plants the CSRF cookie, as the app does on load
-        allowed = strict.post("/api/auth/login/", {"username": "ada", "password": PASSWORD}, format="json",
-                              HTTP_X_CSRFTOKEN=strict.cookies["csrftoken"].value)
+        allowed = strict.post(
+            "/api/auth/login/",
+            {"username": "ada", "password": PASSWORD},
+            format="json",
+            HTTP_X_CSRFTOKEN=strict.cookies["csrftoken"].value,
+        )
         self.assertEqual(allowed.status_code, 200)
 
     def test_remember_me_controls_how_long_the_session_lasts(self):
@@ -146,6 +151,27 @@ class ProfileTests(APITestCase):
             response = self.client.delete("/api/profile/logo/")
             self.assertIsNone(response.data["logo"])
 
+    def test_logo_with_too_many_pixels_is_refused(self):
+        """A small file can still be an enormous image; WeasyPrint decodes it in full."""
+        buffer = io.BytesIO()
+        # One flat colour: comfortably under the 2 MB byte cap, over the pixel cap.
+        Image.new("RGB", (MAX_LOGO_DIMENSION + 200, 10), "navy").save(buffer, "PNG")
+        payload = buffer.getvalue()
+        self.assertLess(len(payload), MAX_LOGO_BYTES, "this fixture must pass the byte check to test the pixel one")
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            upload = SimpleUploadedFile("huge.png", payload, content_type="image/png")
+            response = self.client.post("/api/profile/logo/", {"logo": upload}, format="multipart")
+            self.assertEqual(response.status_code, 400)
+            self.assertIn("pixels", str(response.data["logo"][0]))
+
+    def test_logo_at_the_pixel_limit_is_accepted(self):
+        buffer = io.BytesIO()
+        Image.new("RGB", (MAX_LOGO_DIMENSION, 8), "navy").save(buffer, "PNG")
+        with tempfile.TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            upload = SimpleUploadedFile("edge.png", buffer.getvalue(), content_type="image/png")
+            response = self.client.post("/api/profile/logo/", {"logo": upload}, format="multipart")
+            self.assertEqual(response.status_code, 200)
+
     def test_account_without_profile_is_refused(self):
         self.client.force_authenticate(User.objects.create_user("admin", password=PASSWORD))
         self.assertEqual(self.client.get("/api/cable-types/").status_code, 403)
@@ -166,8 +192,9 @@ class ActivityTests(APITestCase):
         self.client.put(f"/api/sizes/{size.id}/", {"size_label": "1.5mm", "default_price": "34000"}, format="json")
 
         profile = self.client.get("/api/profile/").data
-        self.client.put("/api/profile/",
-                        {**profile, "account_number": "9999999999", "current_password": PASSWORD}, format="json")
+        self.client.put(
+            "/api/profile/", {**profile, "account_number": "9999999999", "current_password": PASSWORD}, format="json"
+        )
 
         entries = self.client.get("/api/activity/").data
         self.assertEqual([entry["action"] for entry in entries], ["bank_changed", "price_changed"])  # newest first
@@ -201,7 +228,9 @@ class ThrottleTests(APITestCase):
 
     def test_password_guessing_is_rate_limited(self):
         codes = [
-            self.client.post("/api/auth/login/", {"username": "ada", "password": f"wrong{i}"}, format="json").status_code
+            self.client.post(
+                "/api/auth/login/", {"username": "ada", "password": f"wrong{i}"}, format="json"
+            ).status_code
             for i in range(11)
         ]
         self.assertEqual(codes[0], 400)
@@ -209,6 +238,59 @@ class ThrottleTests(APITestCase):
         # The block covers the right password too, so guesses can't be checked against it.
         real = self.client.post("/api/auth/login/", {"username": "ada", "password": PASSWORD}, format="json")
         self.assertEqual(real.status_code, 429)
+
+
+class LoginUsernameThrottleTests(APITestCase):
+    """The per-IP limit does not stop many addresses guessing at one account."""
+
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user("ada", password=PASSWORD)
+        BusinessProfile.objects.create(user=self.user, business_name="Acme Cables")
+        User.objects.create_user("grace", password=PASSWORD)
+
+    def guess(self, username, address):
+        return self.client.post(
+            "/api/auth/login/",
+            {"username": username, "password": "wrong-guess"},
+            format="json",
+            REMOTE_ADDR=address,
+        ).status_code
+
+    def test_one_account_cannot_be_guessed_from_many_addresses(self):
+        # Every attempt comes from a different address, so the per-IP throttle never
+        # fires. Only the per-username limit can stop this.
+        codes = [self.guess("ada", f"203.0.113.{i}") for i in range(6)]
+        self.assertEqual(codes[:5], [400] * 5)
+        self.assertEqual(codes[5], 429)
+
+    def test_the_real_password_is_blocked_too(self):
+        for i in range(6):
+            self.guess("ada", f"203.0.113.{i}")
+        blocked = self.client.post(
+            "/api/auth/login/",
+            {"username": "ada", "password": PASSWORD},
+            format="json",
+            REMOTE_ADDR="198.51.100.7",
+        )
+        self.assertEqual(blocked.status_code, 429, "a correct password must not be an oracle past the limit")
+
+    def test_throttling_one_account_does_not_block_another(self):
+        for i in range(6):
+            self.guess("ada", f"203.0.113.{i}")
+        self.assertEqual(self.guess("grace", "198.51.100.9"), 400)
+
+    def test_the_username_key_is_case_insensitive(self):
+        # Usernames are matched case-insensitively at registration, so the throttle
+        # must be too, or "ADA" would be a free extra bucket.
+        for i in range(5):
+            self.guess("ada", f"203.0.113.{i}")
+        self.assertEqual(self.guess("ADA", "198.51.100.11"), 429)
+
+    def test_a_request_without_a_username_is_not_thrown_away(self):
+        """No username to key on: the per-IP throttle still applies, nothing errors."""
+        response = self.client.post("/api/auth/login/", {"password": "x"}, format="json", REMOTE_ADDR="192.0.2.5")
+        self.assertEqual(response.status_code, 400)
 
 
 class SeedDataTests(APITestCase):

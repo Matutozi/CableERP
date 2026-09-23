@@ -45,12 +45,22 @@ function AccessoryForm({ onAdded, onClose }) {
       <form onSubmit={handleSubmit}>
         <div className="field-grid">
           <Field label="Name">
-            <input ref={nameRef} value={name} onChange={(event) => setName(event.target.value)}
-              placeholder="e.g. 13A switched socket" required autoFocus />
+            <input
+              ref={nameRef}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="e.g. 13A switched socket"
+              required
+              autoFocus
+            />
           </Field>
           <Field label="Sold per">
             <select value={unit} onChange={(event) => setUnit(event.target.value)}>
-              {ACCESSORY_UNITS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              {ACCESSORY_UNITS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </select>
           </Field>
           <Field label="Price">
@@ -58,8 +68,12 @@ function AccessoryForm({ onAdded, onClose }) {
           </Field>
         </div>
         <div className="form-actions">
-          <button type="button" className="btn btn-secondary" onClick={onClose}>Done</button>
-          <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? "Adding…" : "Add accessory"}</button>
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
+            Done
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={busy}>
+            {busy ? "Adding…" : "Add accessory"}
+          </button>
         </div>
       </form>
     </section>
@@ -69,8 +83,14 @@ function AccessoryForm({ onAdded, onClose }) {
 function AccessoryRow({ accessory, onSave, onDelete }) {
   const [name, setName] = useState(accessory.name);
   const [showTrend, setShowTrend] = useState(false);
+  const [lastName, setLastName] = useState(accessory.name);
 
-  useEffect(() => setName(accessory.name), [accessory.name]);
+  // Resync the field when the row's name changes underneath it. Done during render
+  // rather than in an effect, which would cost a second pass on every edit.
+  if (lastName !== accessory.name) {
+    setLastName(accessory.name);
+    setName(accessory.name);
+  }
 
   async function commitName() {
     const trimmed = name.trim();
@@ -87,19 +107,46 @@ function AccessoryRow({ accessory, onSave, onDelete }) {
 
   return (
     <div className="acc-row">
-      <input className="inline-name" value={name} aria-label={`Name of ${accessory.name}`}
-        onChange={(event) => setName(event.target.value)} onBlur={commitName}
-        onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()} />
-      <select className="inline-select" value={accessory.unit} aria-label={`Unit for ${accessory.name}`}
-        onChange={(event) => onSave({ unit: event.target.value }).catch(() => {})}>
-        {ACCESSORY_UNITS.map(([value, label]) => <option key={value} value={value}>per {label.toLowerCase()}</option>)}
+      <input
+        className="inline-name"
+        value={name}
+        aria-label={`Name of ${accessory.name}`}
+        onChange={(event) => setName(event.target.value)}
+        onBlur={commitName}
+        onKeyDown={(event) => event.key === "Enter" && event.currentTarget.blur()}
+      />
+      <select
+        className="inline-select"
+        value={accessory.unit}
+        aria-label={`Unit for ${accessory.name}`}
+        onChange={(event) => onSave({ unit: event.target.value }).catch(() => {})}
+      >
+        {ACCESSORY_UNITS.map(([value, label]) => (
+          <option key={value} value={value}>
+            per {label.toLowerCase()}
+          </option>
+        ))}
       </select>
-      <InlinePrice price={accessory.default_price} label={`Price for ${accessory.name}`} onSave={(price) => onSave({ default_price: price })} />
-      <button type="button" className="icon-btn icon-btn-danger" aria-label={`Delete ${accessory.name}`} onClick={onDelete}>
+      <InlinePrice
+        price={accessory.default_price}
+        label={`Price for ${accessory.name}`}
+        onSave={(price) => onSave({ default_price: price })}
+      />
+      <button
+        type="button"
+        className="icon-btn icon-btn-danger"
+        aria-label={`Delete ${accessory.name}`}
+        onClick={onDelete}
+      >
         <Icon name="trash" size={14} />
       </button>
-      <button type="button" className="cost-toggle" aria-expanded={showTrend}
-        title="Show how this price and its cost have moved" onClick={() => setShowTrend(!showTrend)}>
+      <button
+        type="button"
+        className="cost-toggle"
+        aria-expanded={showTrend}
+        title="Show how this price and its cost have moved"
+        onClick={() => setShowTrend(!showTrend)}
+      >
         <CostNote row={accessory} unit={unitLabel(accessory.unit, 1)} />
       </button>
       {showTrend && <TrendPanel kind="accessory" id={accessory.id} unit={accessory.unit} />}
@@ -114,12 +161,17 @@ export default function Accessories() {
   const [search, setSearch] = useState("");
 
   useEffect(() => {
-    api.listAccessories().then(setAccessories).catch((err) => setError(err.message));
+    api
+      .listAccessories()
+      .then(setAccessories)
+      .catch((err) => setError(err.message));
   }, []);
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return term ? accessories?.filter((accessory) => accessory.name.toLowerCase().includes(term)) : accessories;
+    return term
+      ? accessories?.filter((accessory) => accessory.name.toLowerCase().includes(term))
+      : accessories;
   }, [accessories, search]);
 
   async function save(accessory, patch) {
@@ -152,18 +204,33 @@ export default function Accessories() {
   return (
     <div className="page">
       <CatalogueHeader
-        action={!adding && <button type="button" className="btn btn-secondary" onClick={() => setAdding(true)}>Add accessory</button>} />
+        action={
+          !adding && (
+            <button type="button" className="btn btn-secondary" onClick={() => setAdding(true)}>
+              Add accessory
+            </button>
+          )
+        }
+      />
 
       {error && <div className="alert alert-error">{error}</div>}
 
       {adding && (
-        <AccessoryForm onClose={() => setAdding(false)}
-          onAdded={(created) => setAccessories((current) => [...(current ?? []), created])} />
+        <AccessoryForm
+          onClose={() => setAdding(false)}
+          onAdded={(created) => setAccessories((current) => [...(current ?? []), created])}
+        />
       )}
 
       {accessories?.length > 0 && (
-        <input className="search" type="search" placeholder="Search accessories" value={search}
-          onChange={(event) => setSearch(event.target.value)} aria-label="Search accessories" />
+        <input
+          className="search"
+          type="search"
+          placeholder="Search accessories"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          aria-label="Search accessories"
+        />
       )}
 
       {visible === null ? (
@@ -171,7 +238,8 @@ export default function Accessories() {
       ) : accessories.length === 0 ? (
         !adding && (
           <div className="empty">
-            No accessories yet. Add the other things you sell, such as sockets, switches, breakers, conduit and tape.
+            No accessories yet. Add the other things you sell, such as sockets, switches, breakers, conduit
+            and tape.
           </div>
         )
       ) : visible.length === 0 ? (
@@ -179,8 +247,12 @@ export default function Accessories() {
       ) : (
         <div className="panel flush acc-rows">
           {visible.map((accessory) => (
-            <AccessoryRow key={accessory.id} accessory={accessory}
-              onSave={(patch) => save(accessory, patch)} onDelete={() => remove(accessory)} />
+            <AccessoryRow
+              key={accessory.id}
+              accessory={accessory}
+              onSave={(patch) => save(accessory, patch)}
+              onDelete={() => remove(accessory)}
+            />
           ))}
         </div>
       )}

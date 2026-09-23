@@ -24,11 +24,18 @@ export default function QuoteTable({ quotes }) {
         </thead>
         <tbody>
           {quotes.map((quote) => (
-            <tr key={quote.id} tabIndex={0} onClick={() => open(quote)} onKeyDown={(event) => event.key === "Enter" && open(quote)}>
+            <tr
+              key={quote.id}
+              tabIndex={0}
+              onClick={() => open(quote)}
+              onKeyDown={(event) => event.key === "Enter" && open(quote)}
+            >
               <td className="strong tabular">{quote.reference_number}</td>
               <td>{quote.customer_name}</td>
               <td className="dim">{formatDate(quote.date)}</td>
-              <td><StatusBadge status={quote.status} /></td>
+              <td>
+                <StatusBadge status={quote.status} />
+              </td>
               <td className="num strong">₦{formatNaira(quote.grand_total)}</td>
             </tr>
           ))}
@@ -43,7 +50,9 @@ export default function QuoteTable({ quotes }) {
               <StatusBadge status={quote.status} />
             </div>
             <div className="quote-card-bottom">
-              <span className="quote-card-meta">{quote.reference_number}, {formatDate(quote.date)}</span>
+              <span className="quote-card-meta">
+                {quote.reference_number}, {formatDate(quote.date)}
+              </span>
               <span className="quote-card-amount">₦{formatNaira(quote.grand_total)}</span>
             </div>
           </button>

@@ -38,10 +38,7 @@ def item_history(row):
         .order_by("purchase__date", "purchase_id", "id")
     )
     return {
-        "price": [
-            {"date": change.changed_at.date(), "value": change.price}
-            for change in row.price_changes.all()
-        ],
+        "price": [{"date": change.changed_at.date(), "value": change.price} for change in row.price_changes.all()],
         "cost": [
             {
                 "date": item.purchase.date,
@@ -111,7 +108,9 @@ class CableSizeViewSet(
         if size.default_price != was:
             record_price(size, self.request.user)
             record(
-                get_business(self.request), self.request.user, AuditLog.Action.PRICE_CHANGED,
+                get_business(self.request),
+                self.request.user,
+                AuditLog.Action.PRICE_CHANGED,
                 f"{naira(was)} → {naira(size.default_price)}",
                 reference=f"{size.size_label} {size.cable_type.name}",
             )
@@ -133,7 +132,9 @@ class AccessoryViewSet(ItemHistoryMixin, BusinessCatalogueMixin, viewsets.ModelV
         if accessory.default_price != was:
             record_price(accessory, self.request.user)
             record(
-                get_business(self.request), self.request.user, AuditLog.Action.PRICE_CHANGED,
+                get_business(self.request),
+                self.request.user,
+                AuditLog.Action.PRICE_CHANGED,
                 f"{naira(was)} → {naira(accessory.default_price)}",
                 reference=accessory.name,
             )
@@ -163,12 +164,14 @@ class PriceMovementsView(APIView):
             .values_list("cable_size")
             .annotate(last=Max("purchase__date"))
         }
-        latest.update({
-            ("accessory", pk): date
-            for pk, date in restocked.filter(accessory__business=business)
-            .values_list("accessory")
-            .annotate(last=Max("purchase__date"))
-        })
+        latest.update(
+            {
+                ("accessory", pk): date
+                for pk, date in restocked.filter(accessory__business=business)
+                .values_list("accessory")
+                .annotate(last=Max("purchase__date"))
+            }
+        )
 
         recent = sorted(latest.items(), key=lambda entry: (entry[1], entry[0][1]), reverse=True)[:MOVEMENT_LIMIT]
         rows = {
@@ -183,15 +186,17 @@ class PriceMovementsView(APIView):
             row = rows[kind].get(pk)
             if row is None:
                 continue
-            movements.append({
-                "kind": kind,
-                "id": row.pk,
-                "name": str(row),
-                "unit": row.sale_unit,
-                "price": row.default_price,
-                "last_unit_cost": row.last_unit_cost,
-                "margin_percentage": row.margin_percentage,
-                "last_moved": moved_on,
-                "history": item_history(row),
-            })
+            movements.append(
+                {
+                    "kind": kind,
+                    "id": row.pk,
+                    "name": str(row),
+                    "unit": row.sale_unit,
+                    "price": row.default_price,
+                    "last_unit_cost": row.last_unit_cost,
+                    "margin_percentage": row.margin_percentage,
+                    "last_moved": moved_on,
+                    "history": item_history(row),
+                }
+            )
         return Response(PriceMovementSerializer(movements, many=True).data)

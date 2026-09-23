@@ -98,15 +98,18 @@ class QuoteLineItemSerializer(serializers.ModelSerializer):
         if len(names) != len(set(names)):
             raise serializers.ValidationError({"colours": "Each colour can only be listed once."})
         if attrs["unit"] not in FRACTIONAL_UNITS and any(entry["quantity"] % 1 for entry in colours):
-            raise serializers.ValidationError({"colours": f"{attrs['unit'].capitalize()} quantities must be whole numbers."})
+            raise serializers.ValidationError(
+                {"colours": f"{attrs['unit'].capitalize()} quantities must be whole numbers."}
+            )
         return attrs
 
 
 class QuoteSerializer(serializers.ModelSerializer):
     line_items = QuoteLineItemSerializer(many=True)
     transport_cost = serializers.DecimalField(required=False, **PRICE_FIELD)
-    vat_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=Decimal("0"),
-                                              max_value=Decimal("100"), required=False)
+    vat_percentage = serializers.DecimalField(
+        max_digits=5, decimal_places=2, min_value=Decimal("0"), max_value=Decimal("100"), required=False
+    )
     revision_of_reference = serializers.CharField(source="revision_of.reference_number", read_only=True, default=None)
     subtotal = serializers.DecimalField(**TOTAL_FIELD)
     vat_amount = serializers.DecimalField(**TOTAL_FIELD)

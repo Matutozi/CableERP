@@ -18,5 +18,5 @@ frontend/dist/
 .DS_Store
 
 .env
-backend/.env.example
+!backend/.env.example
 backend/*.sqlite3.*

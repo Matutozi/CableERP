@@ -1,0 +1,9 @@
+dist
+node_modules
+package-lock.json
+
+# index.css is written one rule per line on purpose: it reads as a token and
+# component sheet rather than as prose. Prettier expands it from 573 lines to
+# 2167, which makes every future CSS diff noisier for no correctness gain.
+# Delete this line if the team would rather have it formatted.
+src/index.css

@@ -6,13 +6,27 @@ import { api } from "../services/api.js";
 import { formatQty, isFractionalUnit, toNumber, unitLabel } from "../services/format.js";
 import { canShareFiles, downloadWaybillPdf, shareWaybillPdf } from "../services/pdf.js";
 
-const FIELDS = ["customer_name", "date", "invoice_number", "branch", "vehicle_number", "product_manufacturer", "notes"];
+const FIELDS = [
+  "customer_name",
+  "date",
+  "invoice_number",
+  "branch",
+  "vehicle_number",
+  "product_manufacturer",
+  "notes",
+];
 
 let nextKey = 1;
 
 /** A saved line as editable state: quantities keyed by colour ("" for items not sold by colour). */
 function toEditable(item) {
-  return { ...item, key: nextKey++, quantities: Object.fromEntries(item.colours.map((entry) => [entry.colour, String(toNumber(entry.quantity))])) };
+  return {
+    ...item,
+    key: nextKey++,
+    quantities: Object.fromEntries(
+      item.colours.map((entry) => [entry.colour, String(toNumber(entry.quantity))]),
+    ),
+  };
 }
 
 function toPayload(fields, items) {
@@ -36,7 +50,8 @@ function toPayload(fields, items) {
 
 function itemProblem(item) {
   const quantities = Object.values(item.quantities).map(toNumber);
-  if (!quantities.some((quantity) => quantity > 0)) return "Enter a quantity, or remove this line from the waybill.";
+  if (!quantities.some((quantity) => quantity > 0))
+    return "Enter a quantity, or remove this line from the waybill.";
   if (!isFractionalUnit(item.unit) && quantities.some((quantity) => !Number.isInteger(quantity))) {
     return `Quantities in ${unitLabel(item.unit)} must be whole numbers.`;
   }
@@ -62,22 +77,42 @@ export default function WaybillEditor() {
   }
 
   useEffect(() => {
-    api.getWaybill(id).then(apply).catch((err) => setError(err.message));
+    api
+      .getWaybill(id)
+      .then(apply)
+      .catch((err) => setError(err.message));
   }, [id]);
 
   if (!fields) {
-    return <div className="page">{error ? <div className="alert alert-error">{error}</div> : <p className="muted">Loading…</p>}</div>;
+    return (
+      <div className="page">
+        {error ? <div className="alert alert-error">{error}</div> : <p className="muted">Loading…</p>}
+      </div>
+    );
   }
 
-  const savedPayload = JSON.stringify(toPayload(Object.fromEntries(FIELDS.map((name) => [name, waybill[name] ?? ""])), waybill.items.map(toEditable)));
+  const savedPayload = JSON.stringify(
+    toPayload(
+      Object.fromEntries(FIELDS.map((name) => [name, waybill[name] ?? ""])),
+      waybill.items.map(toEditable),
+    ),
+  );
   const dirty = JSON.stringify(toPayload(fields, items)) !== savedPayload;
   const setField = (name) => (event) => setFields({ ...fields, [name]: event.target.value });
   const setQuantity = (key, colour, value) =>
-    setItems((current) => current.map((item) => (item.key === key ? { ...item, quantities: { ...item.quantities, [colour]: value.replace(/[^\d.]/g, "") } } : item)));
+    setItems((current) =>
+      current.map((item) =>
+        item.key === key
+          ? { ...item, quantities: { ...item.quantities, [colour]: value.replace(/[^\d.]/g, "") } }
+          : item,
+      ),
+    );
 
   /** Save if anything changed, so the PDF always matches what is on screen. */
   async function save() {
-    const found = Object.fromEntries(items.map((item) => [item.key, itemProblem(item)]).filter(([, problem]) => problem));
+    const found = Object.fromEntries(
+      items.map((item) => [item.key, itemProblem(item)]).filter(([, problem]) => problem),
+    );
     setProblems(found);
     if (!fields.customer_name.trim()) throw new Error("Enter who the goods are going to.");
     if (!items.length) throw new Error("A waybill needs at least one item.");
@@ -102,22 +137,29 @@ export default function WaybillEditor() {
     }
   }
 
-  const handleSave = () => run("save", async () => {
-    await save();
-    setNotice("Waybill saved.");
-  });
+  const handleSave = () =>
+    run("save", async () => {
+      await save();
+      setNotice("Waybill saved.");
+    });
 
-  const handleDownload = () => run("download", async () => {
-    const saved = await save();
-    await downloadWaybillPdf(saved);
-    setNotice(`Downloaded ${saved.reference_number}.pdf.`);
-  });
+  const handleDownload = () =>
+    run("download", async () => {
+      const saved = await save();
+      await downloadWaybillPdf(saved);
+      setNotice(`Downloaded ${saved.reference_number}.pdf.`);
+    });
 
-  const handleShare = () => run("share", async () => {
-    const saved = await save();
-    const outcome = await shareWaybillPdf(saved, `Waybill ${saved.reference_number} for ${saved.customer_name}.`);
-    if (outcome === "downloaded") setNotice("This browser couldn't open the share menu, so the PDF was downloaded.");
-  });
+  const handleShare = () =>
+    run("share", async () => {
+      const saved = await save();
+      const outcome = await shareWaybillPdf(
+        saved,
+        `Waybill ${saved.reference_number} for ${saved.customer_name}.`,
+      );
+      if (outcome === "downloaded")
+        setNotice("This browser couldn't open the share menu, so the PDF was downloaded.");
+    });
 
   function handleDelete() {
     if (!window.confirm(`Delete waybill ${waybill.reference_number}? This cannot be undone.`)) return;
@@ -150,7 +192,14 @@ export default function WaybillEditor() {
           <h1>{waybill.reference_number}</h1>
           <div className="page-sub">
             Waybill
-            {waybill.quote ? <> · from <Link to={`/quotes/${waybill.quote}`}>{waybill.quote_reference}</Link></> : " · quote since deleted"}
+            {waybill.quote ? (
+              <>
+                {" "}
+                · from <Link to={`/quotes/${waybill.quote}`}>{waybill.quote_reference}</Link>
+              </>
+            ) : (
+              " · quote since deleted"
+            )}
           </div>
         </div>
         <div className="page-actions">{actions}</div>
@@ -167,19 +216,56 @@ export default function WaybillEditor() {
           <Field label="Date">
             <input type="date" value={fields.date} onChange={setField("date")} />
           </Field>
-          <Field label="Invoice No" hint="Starts as the quote's reference. Change it to your invoice number if you have one.">
+          <Field
+            label="Invoice No"
+            hint="Starts as the quote's reference. Change it to your invoice number if you have one."
+          >
             <input value={fields.invoice_number} onChange={setField("invoice_number")} />
           </Field>
-          <Field label={<>Branch <span className="optional">(optional)</span></>}>
+          <Field
+            label={
+              <>
+                Branch <span className="optional">(optional)</span>
+              </>
+            }
+          >
             <input value={fields.branch} onChange={setField("branch")} placeholder="e.g. Arepo" />
           </Field>
-          <Field label={<>Vehicle No <span className="optional">(optional)</span></>}>
-            <input value={fields.vehicle_number} onChange={setField("vehicle_number")} placeholder="e.g. LSD 482 KJ" autoCapitalize="characters" />
+          <Field
+            label={
+              <>
+                Vehicle No <span className="optional">(optional)</span>
+              </>
+            }
+          >
+            <input
+              value={fields.vehicle_number}
+              onChange={setField("vehicle_number")}
+              placeholder="e.g. LSD 482 KJ"
+              autoCapitalize="characters"
+            />
           </Field>
-          <Field label={<>Product of <span className="optional">(optional)</span></>}>
-            <input value={fields.product_manufacturer} onChange={setField("product_manufacturer")} placeholder="e.g. Coleman Wires and Cables" />
+          <Field
+            label={
+              <>
+                Product of <span className="optional">(optional)</span>
+              </>
+            }
+          >
+            <input
+              value={fields.product_manufacturer}
+              onChange={setField("product_manufacturer")}
+              placeholder="e.g. Coleman Wires and Cables"
+            />
           </Field>
-          <Field label={<>Notes <span className="optional">(optional)</span></>} wide>
+          <Field
+            label={
+              <>
+                Notes <span className="optional">(optional)</span>
+              </>
+            }
+            wide
+          >
             <textarea rows={2} value={fields.notes} onChange={setField("notes")} />
           </Field>
         </div>
@@ -203,8 +289,12 @@ export default function WaybillEditor() {
                   {item.model_label && <span className="waybill-model">{item.model_label}</span>}
                   <span className="waybill-desc">{item.description}</span>
                 </span>
-                <button type="button" className="icon-btn icon-btn-danger" aria-label={`Remove ${item.description}`}
-                  onClick={() => setItems((current) => current.filter((entry) => entry.key !== item.key))}>
+                <button
+                  type="button"
+                  className="icon-btn icon-btn-danger"
+                  aria-label={`Remove ${item.description}`}
+                  onClick={() => setItems((current) => current.filter((entry) => entry.key !== item.key))}
+                >
                   <Icon name="trash" size={15} />
                 </button>
               </div>
@@ -213,22 +303,34 @@ export default function WaybillEditor() {
                   {colours.map((colour) => (
                     <label key={colour} className="colour-input">
                       <span className="colour-abbr">{colour}</span>
-                      <input type="text" inputMode={mode} value={item.quantities[colour]} aria-label={`${colour} quantity`}
-                        onChange={(event) => setQuantity(item.key, colour, event.target.value)} />
+                      <input
+                        type="text"
+                        inputMode={mode}
+                        value={item.quantities[colour]}
+                        aria-label={`${colour} quantity`}
+                        onChange={(event) => setQuantity(item.key, colour, event.target.value)}
+                      />
                     </label>
                   ))}
                 </div>
               ) : (
                 <label className="w-qty">
                   <span className="field-label">Qty ({unitLabel(item.unit)})</span>
-                  <input type="text" inputMode={mode} value={item.quantities[""] ?? ""} aria-label={`Quantity of ${item.description}`}
-                    onChange={(event) => setQuantity(item.key, "", event.target.value)} />
+                  <input
+                    type="text"
+                    inputMode={mode}
+                    value={item.quantities[""] ?? ""}
+                    aria-label={`Quantity of ${item.description}`}
+                    onChange={(event) => setQuantity(item.key, "", event.target.value)}
+                  />
                 </label>
               )}
               {problems[item.key] && <div className="item-error">{problems[item.key]}</div>}
               <div className="item-foot">
                 <span />
-                <span className="item-qty">{formatQty(total)} {unitLabel(item.unit, total)}</span>
+                <span className="item-qty">
+                  {formatQty(total)} {unitLabel(item.unit, total)}
+                </span>
               </div>
             </div>
           );
@@ -236,7 +338,9 @@ export default function WaybillEditor() {
       </div>
 
       <div className="waybill-foot">
-        <button type="button" className="btn-link btn-link-danger" onClick={handleDelete} disabled={!!busy}>Delete this waybill</button>
+        <button type="button" className="btn-link btn-link-danger" onClick={handleDelete} disabled={!!busy}>
+          Delete this waybill
+        </button>
       </div>
     </div>
   );

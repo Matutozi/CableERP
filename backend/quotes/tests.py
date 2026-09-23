@@ -1,13 +1,12 @@
 from datetime import timedelta
 from decimal import Decimal
-
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.template.loader import render_to_string
-from django.utils import timezone
 from django.test import SimpleTestCase
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from accounts.models import BusinessProfile
@@ -21,8 +20,13 @@ User = get_user_model()
 
 def make_business(username):
     user = User.objects.create_user(username, password="a-strong-pass-123")
-    return user, BusinessProfile.objects.create(user=user, business_name=f"{username} Cables", bank_name="Wema Bank",
-                                                account_number="0125277464", phone_numbers="0817, 0803")
+    return user, BusinessProfile.objects.create(
+        user=user,
+        business_name=f"{username} Cables",
+        bank_name="Wema Bank",
+        account_number="0125277464",
+        phone_numbers="0817, 0803",
+    )
 
 
 def singles_line(price="33000", **colours):
@@ -118,7 +122,9 @@ class QuoteApiTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("whole numbers", str(response.data))
 
-        response = self.create_quote(line_items=[plain_line("16mm", "57500", "12.5", unit="metre", type_name="Armoured")])
+        response = self.create_quote(
+            line_items=[plain_line("16mm", "57500", "12.5", unit="metre", type_name="Armoured")]
+        )
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.data["grand_total"], "772656.25")  # 718,750 + 7.5% VAT
 
@@ -150,7 +156,10 @@ class QuoteApiTests(APITestCase):
         self.assertEqual(pdf.status_code, 200)
         self.assertTrue(pdf.content.startswith(b"%PDF"))
 
-        self.assertIn("Piece quantities must be whole numbers", str(self.create_quote(line_items=[accessory_line(qty="1.5")]).data))
+        self.assertIn(
+            "Piece quantities must be whole numbers",
+            str(self.create_quote(line_items=[accessory_line(qty="1.5")]).data),
+        )
         self.assertEqual(self.create_quote(line_items=[accessory_line(name=" ")]).status_code, 400)
         self.assertEqual(self.create_quote(line_items=[accessory_line(unit="metre", qty="2.5")]).status_code, 201)
         self.assertEqual(self.create_quote(line_items=[accessory_line(unit="bucket")]).status_code, 400)
@@ -220,10 +229,14 @@ class QuoteApiTests(APITestCase):
         self.assertEqual(sent.status_code, 200)
         self.assertIsNotNone(sent.data["sent_at"])
 
-        blocked = self.client.put(f"/api/quotes/{quote['id']}/", {**quote, "customer_name": "Someone else"}, format="json")
+        blocked = self.client.put(
+            f"/api/quotes/{quote['id']}/", {**quote, "customer_name": "Someone else"}, format="json"
+        )
         self.assertEqual(blocked.status_code, 400)
         self.assertIn("Create a revision", str(blocked.data))
-        self.assertEqual(self.client.patch(f"/api/quotes/{quote['id']}/", {"notes": "x"}, format="json").status_code, 400)
+        self.assertEqual(
+            self.client.patch(f"/api/quotes/{quote['id']}/", {"notes": "x"}, format="json").status_code, 400
+        )
         self.assertEqual(self.client.delete(f"/api/quotes/{quote['id']}/").status_code, 400)
 
         revision = self.client.post(f"/api/quotes/{quote['id']}/revise/", format="json")
@@ -236,8 +249,9 @@ class QuoteApiTests(APITestCase):
         self.assertEqual(len(revision.data["line_items"]), len(quote["line_items"]))
 
         # The revision is editable, and the sent original is untouched.
-        edited = self.client.put(f"/api/quotes/{revision.data['id']}/",
-                                 {**revision.data, "customer_name": "Mrs Adeyemi"}, format="json")
+        edited = self.client.put(
+            f"/api/quotes/{revision.data['id']}/", {**revision.data, "customer_name": "Mrs Adeyemi"}, format="json"
+        )
         self.assertEqual(edited.status_code, 200)
         original = self.client.get(f"/api/quotes/{quote['id']}/").data
         self.assertEqual(original["customer_name"], "Mr Abimbola")
@@ -250,8 +264,9 @@ class QuoteApiTests(APITestCase):
         self.client.delete(f"/api/quotes/{quote['id']}/")  # refused: sent quotes are records
 
         entries = self.client.get("/api/activity/").data
-        self.assertEqual([entry["action"] for entry in entries],
-                         ["quote_revised", "quote_sent", "quote_created"])  # newest first, no delete line
+        self.assertEqual(
+            [entry["action"] for entry in entries], ["quote_revised", "quote_sent", "quote_created"]
+        )  # newest first, no delete line
         self.assertEqual(entries[1]["reference"], quote["reference_number"])
         self.assertIn("Mr Abimbola", entries[1]["summary"])
 
@@ -323,9 +338,12 @@ class QuoteApiTests(APITestCase):
 class QuoteModelTests(APITestCase):
     def test_totals_round_half_up(self):
         _, business = make_business("ada")
-        quote = Quote.objects.create(business=business, reference_number="QT-1", customer_name="A", staff_name="B",
-                                     vat_percentage=Decimal("7.5"))
-        item = quote.line_items.create(cable_type_name="Armoured", size_label="16mm", unit="metre", unit_price=Decimal("0.33"))
+        quote = Quote.objects.create(
+            business=business, reference_number="QT-1", customer_name="A", staff_name="B", vat_percentage=Decimal("7.5")
+        )
+        item = quote.line_items.create(
+            cable_type_name="Armoured", size_label="16mm", unit="metre", unit_price=Decimal("0.33")
+        )
         item.colours.create(colour="", quantity=Decimal("0.5"))  # 0.165 -> 0.17
         self.assertEqual(item.amount, Decimal("0.17"))
         self.assertEqual(quote.vat_amount, Decimal("0.01"))
@@ -353,10 +371,16 @@ class QuoteDateTests(APITestCase):
         self.client.force_authenticate(self.user)
 
     def post(self, date):
-        return self.client.post("/api/quotes/", {
-            "customer_name": "Dangote", "staff_name": "Ada", "date": date.isoformat(),
-            "line_items": [plain_line("1.5mm", "33000", 2)],
-        }, format="json")
+        return self.client.post(
+            "/api/quotes/",
+            {
+                "customer_name": "Dangote",
+                "staff_name": "Ada",
+                "date": date.isoformat(),
+                "line_items": [plain_line("1.5mm", "33000", 2)],
+            },
+            format="json",
+        )
 
     def test_a_quote_cannot_be_dated_in_the_future(self):
         """The date drives the reference number, so a future one misfiles the quote as well."""
@@ -392,10 +416,16 @@ class QuoteMarginTests(APITestCase):
         self.assertEqual(response.status_code, 201, response.data)
 
     def create_quote(self, lines=None):
-        lines = lines or [{
-            "cable_type_name": "Flex", "size_label": "2.5mm", "unit": "coil", "unit_price": "90000",
-            "cable_size": self.size.pk, "colours": [{"colour": "", "quantity": 2}],
-        }]
+        lines = lines or [
+            {
+                "cable_type_name": "Flex",
+                "size_label": "2.5mm",
+                "unit": "coil",
+                "unit_price": "90000",
+                "cable_size": self.size.pk,
+                "colours": [{"colour": "", "quantity": 2}],
+            }
+        ]
         response = self.client.post(
             "/api/quotes/",
             {"customer_name": "Dangote", "staff_name": "Ada", "vat_percentage": "0", "line_items": lines},
@@ -438,11 +468,19 @@ class QuoteMarginTests(APITestCase):
         self.assertEqual(revision.data["line_items"][0]["unit_cost"], "85000.0000")
 
     def test_an_uncosted_line_is_unknown_not_free(self):
-        quote = self.create_quote([
-            {"cable_type_name": "Flex", "size_label": "2.5mm", "unit": "coil", "unit_price": "90000",
-             "cable_size": self.size.pk, "colours": [{"colour": "", "quantity": 1}]},
-            accessory_line(name="Insulation tape", price="500", qty=4),
-        ])
+        quote = self.create_quote(
+            [
+                {
+                    "cable_type_name": "Flex",
+                    "size_label": "2.5mm",
+                    "unit": "coil",
+                    "unit_price": "90000",
+                    "cable_size": self.size.pk,
+                    "colours": [{"colour": "", "quantity": 1}],
+                },
+                accessory_line(name="Insulation tape", price="500", qty=4),
+            ]
+        )
         line = quote["line_items"][1]
         self.assertIsNone(line["unit_cost"])
         self.assertIsNone(line["margin_amount"])
@@ -451,8 +489,9 @@ class QuoteMarginTests(APITestCase):
         self.assertEqual(quote["total_margin"], "18000.00")
         self.assertEqual(quote["margin_coverage"]["costed_items"], 1)
         self.assertEqual(quote["margin_coverage"]["total_items"], 2)
-        self.assertEqual(Decimal(str(quote["margin_coverage"]["value_share"])).quantize(Decimal("0.01")),
-                         Decimal("97.83"))
+        self.assertEqual(
+            Decimal(str(quote["margin_coverage"]["value_share"])).quantize(Decimal("0.01")), Decimal("97.83")
+        )
 
     def test_a_quote_with_no_costs_at_all_reports_nothing_rather_than_zero(self):
         quote = self.create_quote([accessory_line(name="Insulation tape", price="500", qty=4)])
@@ -464,9 +503,7 @@ class QuoteMarginTests(APITestCase):
         """The one leak that would matter: a customer must never see what the stock cost."""
         quote_data = self.create_quote()
         quote = Quote.objects.get(pk=quote_data["id"])
-        html = render_to_string(
-            "quotes/quote_pdf.html", {"quote": quote, "business": self.business, "logo_uri": None}
-        )
+        html = render_to_string("quotes/quote_pdf.html", {"quote": quote, "business": self.business, "logo_uri": None})
         for figure in ("72000", "72,000", "144,000", "36,000", "18000"):
             self.assertNotIn(figure, html, f"{figure} is cost data and must not appear on a customer's quote")
 

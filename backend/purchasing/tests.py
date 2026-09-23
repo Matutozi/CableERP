@@ -29,7 +29,9 @@ class CostingTests(APITestCase):
         self.size = CableSize.objects.create(cable_type=self.by_metre, size_label="1.5mm", default_price="1000")
         self.by_coil = CableType.objects.create(business=self.business, name="Flex", unit="coil")
         self.coil_size = CableSize.objects.create(cable_type=self.by_coil, size_label="2.5mm", default_price="90000")
-        self.socket = Accessory.objects.create(business=self.business, name="13A socket", unit="piece", default_price="2500")
+        self.socket = Accessory.objects.create(
+            business=self.business, name="13A socket", unit="piece", default_price="2500"
+        )
 
     def record(self, lines, additional_cost="0", date="2026-09-01"):
         payload = {"supplier_name": "Lagos Depot", "date": date, "additional_cost": additional_cost, "items": lines}
@@ -38,10 +40,17 @@ class CostingTests(APITestCase):
         return response
 
     def test_coil_cost_is_normalised_to_the_metre_it_is_sold_in(self):
-        self.record([{
-            "cable_size": self.size.pk, "quantity": "3", "entry_unit": "coil",
-            "units_per_entry": "100", "unit_cost": "76500",
-        }])
+        self.record(
+            [
+                {
+                    "cable_size": self.size.pk,
+                    "quantity": "3",
+                    "entry_unit": "coil",
+                    "units_per_entry": "100",
+                    "unit_cost": "76500",
+                }
+            ]
+        )
         self.size.refresh_from_db()
         # ₦76,500 a coil over 100 m is ₦765 a metre — not ₦76,500, which would show a 7,550% loss.
         self.assertEqual(self.size.last_unit_cost, Decimal("765.0000"))
@@ -74,10 +83,14 @@ class CostingTests(APITestCase):
         self.assertLess(abs(landed - purchase.total_cost), Decimal("0.01"))
 
     def test_average_is_weighted_by_quantity_while_last_tracks_the_newest(self):
-        self.record([{"cable_size": self.coil_size.pk, "quantity": "9", "entry_unit": "coil", "unit_cost": "70000"}],
-                    date="2026-08-01")
-        self.record([{"cable_size": self.coil_size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": "90000"}],
-                    date="2026-09-01")
+        self.record(
+            [{"cable_size": self.coil_size.pk, "quantity": "9", "entry_unit": "coil", "unit_cost": "70000"}],
+            date="2026-08-01",
+        )
+        self.record(
+            [{"cable_size": self.coil_size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": "90000"}],
+            date="2026-09-01",
+        )
         self.coil_size.refresh_from_db()
         # Replacement cost is the new price; the average still reflects the nine cheap coils.
         self.assertEqual(self.coil_size.last_unit_cost, Decimal("90000.0000"))
@@ -90,17 +103,21 @@ class CostingTests(APITestCase):
         self.assertEqual(self.coil_size.margin_percentage, Decimal("20.00"))
 
     def test_deleting_a_purchase_removes_the_cost_it_contributed(self):
-        response = self.record([{"cable_size": self.coil_size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": "72000"}])
+        response = self.record(
+            [{"cable_size": self.coil_size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": "72000"}]
+        )
         self.client.delete(f"/api/purchases/{response.data['id']}/")
         self.coil_size.refresh_from_db()
         self.assertIsNone(self.coil_size.last_unit_cost)
         self.assertEqual(AuditLog.objects.filter(action=AuditLog.Action.PURCHASE_DELETED).count(), 1)
 
     def test_editing_a_purchase_corrects_rows_it_no_longer_holds(self):
-        response = self.record([
-            {"cable_size": self.coil_size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": "72000"},
-            {"accessory": self.socket.pk, "quantity": "5", "entry_unit": "piece", "unit_cost": "1800"},
-        ])
+        response = self.record(
+            [
+                {"cable_size": self.coil_size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": "72000"},
+                {"accessory": self.socket.pk, "quantity": "5", "entry_unit": "piece", "unit_cost": "1800"},
+            ]
+        )
         self.socket.refresh_from_db()
         self.assertIsNotNone(self.socket.last_unit_cost)
 
@@ -109,7 +126,9 @@ class CostingTests(APITestCase):
             {
                 "supplier_name": "Lagos Depot",
                 "date": "2026-09-01",
-                "items": [{"cable_size": self.coil_size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": "72000"}],
+                "items": [
+                    {"cable_size": self.coil_size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": "72000"}
+                ],
             },
             format="json",
         )
@@ -156,24 +175,40 @@ class PurchaseApiTests(APITestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_whole_units_only_unless_sold_by_the_metre(self):
-        response = self.post([{"cable_size": self.size.pk, "quantity": "1.5", "entry_unit": "coil", "unit_cost": "72000"}])
+        response = self.post(
+            [{"cable_size": self.size.pk, "quantity": "1.5", "entry_unit": "coil", "unit_cost": "72000"}]
+        )
         self.assertEqual(response.status_code, 400)
         self.assertIn("whole numbers", str(response.data))
 
     def test_conversion_must_be_one_when_bought_and_sold_alike(self):
-        response = self.post([{
-            "cable_size": self.size.pk, "quantity": "1", "entry_unit": "coil",
-            "units_per_entry": "100", "unit_cost": "72000",
-        }])
+        response = self.post(
+            [
+                {
+                    "cable_size": self.size.pk,
+                    "quantity": "1",
+                    "entry_unit": "coil",
+                    "units_per_entry": "100",
+                    "unit_cost": "72000",
+                }
+            ]
+        )
         self.assertEqual(response.status_code, 400)
 
     def test_how_an_item_is_bought_is_remembered_for_next_time(self):
         metre_type = CableType.objects.create(business=self.business, name="Singles", unit="metre")
         size = CableSize.objects.create(cable_type=metre_type, size_label="1.5mm", default_price="1000")
-        self.post([{
-            "cable_size": size.pk, "quantity": "2", "entry_unit": "coil",
-            "units_per_entry": "100", "unit_cost": "76500",
-        }])
+        self.post(
+            [
+                {
+                    "cable_size": size.pk,
+                    "quantity": "2",
+                    "entry_unit": "coil",
+                    "units_per_entry": "100",
+                    "unit_cost": "76500",
+                }
+            ]
+        )
         size.refresh_from_db()
         self.assertEqual(size.purchase_unit, "coil")
         self.assertEqual(size.units_per_purchase, Decimal("100.00"))
@@ -216,8 +251,15 @@ class CostBoundsTests(APITestCase):
     def test_an_impossible_landed_cost_is_refused_not_stored(self):
         response = self.post(
             additional_cost="1000000000",
-            items=[{"cable_size": self.size.pk, "quantity": "0.01", "entry_unit": "metre",
-                    "units_per_entry": "0.01", "unit_cost": "1000000000"}],
+            items=[
+                {
+                    "cable_size": self.size.pk,
+                    "quantity": "0.01",
+                    "entry_unit": "metre",
+                    "units_per_entry": "0.01",
+                    "unit_cost": "1000000000",
+                }
+            ],
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("per unit sold", str(response.data))
@@ -229,8 +271,15 @@ class CostBoundsTests(APITestCase):
 
     def test_the_message_names_the_item_and_what_to_check(self):
         response = self.post(
-            items=[{"cable_size": self.size.pk, "quantity": "1", "entry_unit": "metre",
-                    "units_per_entry": "0.01", "unit_cost": "1000000000"}],
+            items=[
+                {
+                    "cable_size": self.size.pk,
+                    "quantity": "1",
+                    "entry_unit": "metre",
+                    "units_per_entry": "0.01",
+                    "unit_cost": "1000000000",
+                }
+            ],
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("2.5mm Flex", str(response.data))
@@ -256,8 +305,14 @@ class PurchaseDateTests(APITestCase):
         self.size = CableSize.objects.create(cable_type=cable_type, size_label="2.5mm", default_price="100000")
 
     def buy(self, date, cost):
-        return self.client.post("/api/purchases/", {"date": date.isoformat(), "items": [
-            {"cable_size": self.size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": cost}]}, format="json")
+        return self.client.post(
+            "/api/purchases/",
+            {
+                "date": date.isoformat(),
+                "items": [{"cable_size": self.size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": cost}],
+            },
+            format="json",
+        )
 
     def test_a_delivery_cannot_be_dated_in_the_future(self):
         response = self.buy(timezone.localdate() + timedelta(days=1), "9999")
@@ -284,8 +339,14 @@ class LongNameTests(APITestCase):
         cable_type = CableType.objects.create(business=business, name="T" * 100, unit="coil")
         size = CableSize.objects.create(cable_type=cable_type, size_label="S" * 100, default_price="1000")
 
-        response = self.client.post("/api/purchases/", {"date": "2026-09-01", "items": [
-            {"cable_size": size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": "1000"}]}, format="json")
+        response = self.client.post(
+            "/api/purchases/",
+            {
+                "date": "2026-09-01",
+                "items": [{"cable_size": size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": "1000"}],
+            },
+            format="json",
+        )
         self.assertEqual(response.status_code, 201, response.data)
 
         stored = PurchaseItem.objects.get()

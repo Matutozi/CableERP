@@ -22,7 +22,6 @@ UNIT_CHANGE_REFUSED = (
 )
 
 
-
 class BusinessCableSizeField(serializers.PrimaryKeyRelatedField):
     """Only accepts catalogue sizes belonging to the signed-in business."""
 
@@ -80,8 +79,10 @@ class CableTypeSerializer(serializers.ModelSerializer):
 
     def validate_unit(self, value):
         """A type's unit is the unit its costs are held in, so it cannot move under them."""
-        if self.instance and value != self.instance.unit and _priced_in_the_old_unit(
-            {"cable_size__cable_type": self.instance}
+        if (
+            self.instance
+            and value != self.instance.unit
+            and _priced_in_the_old_unit({"cable_size__cable_type": self.instance})
         ):
             raise serializers.ValidationError(UNIT_CHANGE_REFUSED.format(old=self.instance.unit, new=value))
         return value

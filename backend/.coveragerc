@@ -1,0 +1,14 @@
+[run]
+source = accounts,catalogue,purchasing,quotes,waybills
+omit =
+    */migrations/*
+    */tests.py
+    manage.py
+
+[report]
+show_missing = True
+skip_covered = True
+# Measured baseline on 23 Sep 2026: 97% over 1625 statements, 43 missed.
+# The floor sits two points below so ordinary churn does not trip it, and it
+# ratchets upward rather than drifting down.
+fail_under = 95

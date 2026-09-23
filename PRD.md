@@ -25,7 +25,7 @@
 10. [Phase 3 — Sales and customers](#10-phase-3--sales-and-customers-planned)
 11. [Phase 4 — Reporting](#11-phase-4--reporting-planned)
 12. [Phase 5 — Inventory](#12-phase-5--inventory-planned)
-13. [Phase 6 — Multi-user and SaaS](#13-phase-6--multi-user-and-saas-planned)
+13. [Phase 6 — Platform, multi-user and SaaS](#13-phase-6--platform-multi-user-and-saas-next)
 14. [Cross-cutting requirements](#14-cross-cutting-requirements)
 15. [Architecture](#15-architecture)
 16. [Operations](#16-operations)
@@ -221,18 +221,27 @@ addition afterwards. The app must never block a sale because the data isn't set 
 | Phase | Name | Status | Depends on | Core value |
 |---|---|---|---|---|
 | 1 | Quote builder | **Shipped** — live on a single droplet | — | Quote fast, look professional |
-| 2 | Cost and margin | **Built, not deployed** — on branch `phase-2-cost-and-margin` | 1 | Never sell below cost |
+| 2 | Cost and margin | **Shipped** — deployed 22 Sep 2026 | 1 | Never sell below cost |
+| — | Waybills | **Shipped** — built ahead of Phase 3 (see §10.5) | 1 | The driver carries a price-free delivery note |
 | 3 | Sales and customers | Planned | 1 | Know what was actually sold, and to whom |
 | 4 | Reporting | Planned | 2, 3 | Revenue, profit and trends |
 | 5 | Inventory | Planned | 2, 3 | Know what is in the warehouse |
-| 6 | Multi-user and SaaS | Planned | 1–5 | Staff logins, other businesses, revenue |
+| 6 | Platform, multi-user and SaaS | **Next** — resequenced 23 Sep 2026 | 1 | Staff logins, stores, modules, other businesses, revenue |
 
 **Sequencing rationale.** Phase 2 precedes Phase 3 because cost is cheap to add and immediately
 changes every pricing decision, while sales tracking only pays off once there is volume to look at.
 Phase 4 must follow both, because there is nothing worth charting until sales are confirmed and
 cost is known. Phase 5 is last of the operational phases because stock accuracy depends on both
-purchases (in) and sales (out) being trustworthy first. Phase 6 is a data-model change to everything
-before it, so it goes last.
+purchases (in) and sales (out) being trustworthy first.
+
+**Resequencing, 23 Sep 2026.** Phase 6 moves from last to next. The original reasoning — that a
+membership migration is cheaper once the domain stops moving — was correct about the migration and
+wrong about the direction of travel. Phase 6 is now a *precondition* for phases 3–5 rather than a
+consequence of them: stores change where cost is held, module flags decide which of phases 3–5 a
+given business even sees, and per-feature permissions must carry a store dimension from the first
+record written. Building 3–5 first means rewriting all three. The tenant chokepoint
+(`get_business()`) and the app-per-domain split make the change cheap today and progressively more
+expensive with each phase added.
 
 ---
 
@@ -338,7 +347,7 @@ AuditLog         business user action summary reference created_at
 
 ---
 
-## 9. Phase 2 — Cost and margin *(built, not deployed)*
+## 9. Phase 2 — Cost and margin *(shipped)*
 
 ### 9.1 Goal
 
@@ -675,19 +684,33 @@ Accessory       + stock_on_hand reorder_level
 
 ---
 
-## 13. Phase 6 — Multi-user and SaaS *(planned)*
+## 13. Phase 6 — Platform, multi-user and SaaS *(next)*
 
 ### 13.1 Goal
 
-Let a business have staff, let those staff see only what they should, and let CableERP be sold to
-other cable sellers.
+Turn a single-tenant cable application into a platform: businesses onboarded by an operator,
+each with its own stores, staff, permissions and enabled modules.
 
-### 13.2 Why it is last
+### 13.2 Why it now comes first
 
-It changes the data model of everything before it. `BusinessProfile` currently has a one-to-one
-relationship with a user; multi-user makes it one-to-many through a membership with a role, and
-every "who did this" field in the system starts meaning something. That is a migration across six
-phases of data, and it is cheaper once the domain has stopped moving.
+It changes the data model of everything after it. `BusinessProfile` has a one-to-one relationship
+with a user; this phase makes it one-to-many through a membership, adds a store level beneath the
+business, and makes every "who did this" field mean something.
+
+The original plan put this last, reasoning that the migration is cheaper once the domain stops
+moving. That underestimated the coupling. Three of its changes are preconditions rather than
+consequences:
+
+- **Stores** move cost off the catalogue row. Phases 4 and 5 read cost constantly; building them
+  against a business-level cost means rewriting both.
+- **Permissions** are two-dimensional (feature × store). Any permission record written before the
+  store level exists has to be rewritten.
+- **Module flags** decide whether a business sees phases 3–5 at all, so the registry has to precede
+  the modules it gates.
+
+What makes it affordable now: tenancy funnels through one function (`accounts/utils.py:get_business`,
+about 20 call sites), the apps are already domain-separated, and line items are already polymorphic
+(`kind` plus nullable foreign keys), so a new product vertical is additive.
 
 ### 13.3 Functional requirements
 
@@ -696,7 +719,9 @@ phases of data, and it is cheaper once the domain has stopped moving.
 | ID | Requirement |
 |---|---|
 | P6-F1 | Several users per business, via a membership record carrying a role |
-| P6-F2 | Roles: **owner** (everything), **manager** (everything except bank details and user management), **sales** (quotes and customers only) |
+| P6-F2 | Roles are **presets that fill a stored permission set**, not live lookups: **owner** (everything), **manager** (everything except bank details and user management), **sales** (quotes and customers only). Changing a preset later must never grant access to existing members retroactively |
+| P6-F2a | An owner sets access **per major functionality** when inviting a member, and can change it afterwards |
+| P6-F2b | A business may have **more than one owner** |
 | P6-F3 | Invite a user by phone or email; they set their own password |
 | P6-F4 | Suspend or remove a member without deleting their history |
 | P6-F5 | **Hide cost and margin from the sales role** everywhere: API payloads, catalogue, quote builder, dashboard, reports |
@@ -704,6 +729,16 @@ phases of data, and it is cheaper once the domain has stopped moving.
 | P6-F7 | Restrict bank detail changes to the owner |
 | P6-F8 | Name the responsible person on every history entry |
 | P6-F9 | Let a user belong to more than one business and switch between them |
+
+#### Activity tracking
+
+| ID | Requirement |
+|---|---|
+| P6-F9a | Track employee activity across the platform: one audit entry per business action, naming the person |
+| P6-F9b | Log sign-in, member invited and removed, permission changed, module toggled, PDF downloaded and data exported. Downloads and exports matter most — they are how data leaves the business |
+| P6-F9c | The activity view is filterable by member, action and date range, and paginated |
+| P6-F9d | Activity is owner-visible by default. Whether staff see each other's activity is a deliberate product choice, not a default |
+| P6-F9e | Set a retention period before the log grows unbounded |
 
 #### Account recovery
 
@@ -736,10 +771,140 @@ Subscription business plan status trial_ends_at current_period_end
              processor_customer_id processor_subscription_id
 PasswordReset user channel{sms,whatsapp,email} code_hash expires_at used_at
 BusinessProfile  − user(1:1)          # replaced by Membership
+                 + vertical{cable,...} status{active,restricted} theme
 AuditLog         user becomes meaningful rather than always the owner
+                 + store, action widened to 32 chars
+
+Store            business name code address is_active
+Membership       + permissions(JSON) + store scope   # feature x store
+TenantModule     business module enabled enabled_at enabled_by
+StoreItemCost    store item last_unit_cost average_unit_cost
+                 # cost moves off the catalogue row; rebuildable from the ledger
+Quote            + store        Waybill + store      Purchase + store
+CableSize        default_price stays; optional per-store price override
 ```
 
-### 13.5 Security requirements
+### 13.5 Multiple stores per business
+
+A business may trade from several branches. This is a third level in the tenancy model — user →
+business → store — not a module, and it is the change with the widest reach.
+
+| ID | Requirement |
+|---|---|
+| P6-F21 | A business may have several stores; every existing business gets exactly one on migration |
+| P6-F22 | Quotes, waybills and purchases belong to a store, not directly to the business |
+| P6-F23 | **Cost is held per store.** Branches that buy independently have different landed costs |
+| P6-F24 | Selling price stays on the catalogue row, with an optional per-store override |
+| P6-F25 | Reference numbers carry a store code — `QT-IKJ-20260923-001` |
+| P6-F26 | Permissions are granted per feature **per store** |
+| P6-F27 | An owner dashboard consolidates across stores and compares them |
+
+**The cost decision.** `last_unit_cost` and `average_unit_cost` currently sit on the catalogue row,
+one value per business. Per-store cost moves them into a `StoreItemCost(store, item)` table and
+keys the `costing.py` rebuild on `(store, item)`.
+
+This migration is mechanical because of the ledger rule (§5): cost is a cache of purchases, not
+primary data. Add `store` to `Purchase`, run `manage.py rebuild_costs`, and the per-store cache
+repopulates itself. Nothing is lost and nothing needs hand-correction.
+
+**Numbering.** `next_reference_number()` requires a lock on the `BusinessProfile` row. With branches
+that serialises every store behind one row — lock the `Store` row instead.
+
+**Build the level immediately.** Backfilling one default store across six tables is trivial today.
+Adding it after permissions ship means rewriting every permission record written without a store
+dimension.
+
+### 13.6 Modules
+
+Each major functionality is standalone and can be enabled or disabled per business. Odoo is the
+reference for the concept, not the mechanism.
+
+| ID | Requirement |
+|---|---|
+| P6-F28 | Every major functionality is a module that can be enabled or disabled per business |
+| P6-F29 | The superadmin toggles modules per business; new functionality rolls out to existing clients by flag, not by deploy |
+| P6-F30 | Disabling hides the module and refuses writes. **It never deletes data**, and re-enabling restores access rather than resurrecting a partial state |
+| P6-F31 | Modules declare dependencies. Disabling a parent while a dependant is enabled is refused, naming the dependant. Never cascade silently |
+| P6-F32 | `core` and `catalogue` cannot be disabled — the module floor is explicit |
+| P6-F33 | Tiers are out of scope for now. A tier is later defined as a named set of module flags, so the flags are the only thing built today |
+
+**One registry, two gates.** Module enablement and member permissions read the same registry:
+
+```
+effective access = module enabled for the business   (superadmin's call)
+                 AND permission granted to the member (owner's call)
+```
+
+Building these as two separate permission systems is the main avoidable mistake in this phase.
+
+**Not Odoo's mechanism.** Odoo installs and uninstalls code per database, which produces per-tenant
+schema drift and upgrades that break one client and not another. CableERP keeps one codebase, always
+fully deployed, with a registry table deciding what each tenant sees.
+
+**Candidate modules.** Existing: `core`, `catalogue`, `purchasing`, `costs`, `price_history`,
+`quotes`, `waybills`, `activity`. Planned: `customers`, `suppliers`, `sales`, `inventory`,
+`metrics`, `einvoicing`, `messaging`. Note that `customer_name` on a quote and `supplier_name` on a
+purchase are free text today — neither entity exists, and nothing tracks stock on hand.
+
+`metrics` is a consumer, never a producer: it must read whatever is enabled and degrade quietly when
+a source module is off, rather than erroring.
+
+### 13.7 Product verticals
+
+CableERP is the first vertical, not the only one.
+
+| ID | Requirement |
+|---|---|
+| P6-F34 | A product vertical is selected when a business is onboarded; **cable is the default** |
+| P6-F35 | A vertical declares its catalogue shape, default module set, terminology and numbering prefixes |
+| P6-F36 | The costing engine is shared across verticals, not duplicated per vertical |
+
+**Why this is additive.** `QuoteLineItem` already uses a `kind` discriminator with nullable foreign
+keys, resolved in one expression (`row = line.cable_size or line.accessory`). A third product kind
+is one more nullable key and one more clause; `WaybillItem` mirrors it. `CostedItem` is already
+abstract and `purchasing/costing.py` is pure unit-conversion arithmetic with no knowledge of cable.
+
+**Do not flatten the cable schema.** Generalising `CableType`/`CableSize` into a generic
+Product/Variant pair would dilute the deepest part of the product — coil-to-metre conversion and
+colour variants — to serve a vertical with no customer yet. Each vertical owns its own catalogue
+models and shares costing, quotes, waybills and numbering.
+
+### 13.8 Superadmin
+
+A platform operator, not a tenant. This is a security boundary, not a UI convenience.
+
+| ID | Requirement |
+|---|---|
+| P6-F37 | A superadmin onboards a business: profile, first owner, product vertical, default module set |
+| P6-F38 | A superadmin can restrict a business. Restricted means reads allowed, writes refused, existing PDFs still downloadable — a business behind on payment can always retrieve its own records |
+| P6-F39 | Superadmin queries **never** route through `get_business()`. Cross-tenant access lives in separate viewsets under a separate permission class |
+| P6-F40 | Impersonation is read-only by default, time-limited, shows a banner for the whole session, and is logged in both the tenant's log and the platform log |
+| P6-F41 | The platform activity log is separate from any tenant's activity log |
+
+Routing a superadmin through the tenant gate to save code is how cross-tenant leaks are introduced.
+Treat any new queryset that does not call `get_business()` as requiring review.
+
+### 13.9 Interface customisation
+
+Businesses want the product to look like theirs. The requirement is *choice from a set*, not a
+free-form editor — arbitrary CSS becomes unsupportable the moment a customer breaks their own
+layout and asks why.
+
+| ID | Requirement |
+|---|---|
+| P6-F42 | A business chooses a visual theme from a fixed set of presets |
+| P6-F43 | Theme covers accent colour, density and dashboard layout. Business logo and manufacturer logo already exist |
+| P6-F44 | Theme is a business-level setting on the profile, applied through CSS custom properties — one token set swapped at the root, never per-component overrides |
+| P6-F45 | Quote and waybill PDFs offer a choice of layout templates, not arbitrary HTML |
+| P6-F46 | **Any theme value that affects PDF output must be part of the PDF cache key** (§14.4) |
+| P6-F47 | Per-store branding is out of scope. Theme is per business |
+
+P6-F46 is the one that bites. The cache key is currently
+`quote-pdf:{pk}:{quote.updated_at}:{business.updated_at}` — those two timestamps are its only
+invalidation inputs. A theme stored outside the profile, or a template choice held in a module flag,
+will serve a stale PDF after a change.
+
+### 13.10 Security requirements
 
 | ID | Requirement |
 |---|---|
@@ -749,7 +914,7 @@ AuditLog         user becomes meaningful rather than always the owner
 | P6-S4 | A user removed from a business loses access immediately, including existing sessions |
 | P6-S5 | Reset codes are stored hashed and are single-use |
 
-### 13.6 Acceptance criteria
+### 13.11 Acceptance criteria
 
 - [ ] A sales user can raise a quote and never sees a cost anywhere, including in raw API responses
 - [ ] A manager can change prices but not bank details
@@ -757,6 +922,51 @@ AuditLog         user becomes meaningful rather than always the owner
 - [ ] A password can be recovered without administrator involvement
 - [ ] A new business can sign up and produce its first quote without support
 - [ ] A lapsed subscription restricts writes but never hides existing data
+- [ ] An owner of three stores sees consolidated and per-store figures side by side
+- [ ] A module disabled for a business is invisible in navigation and refuses writes, with data intact on re-enable
+- [ ] A restricted business can still read its records and download existing PDFs
+
+### 13.12 Build plan and parallelisation
+
+Most of this phase parallelises. What does not is a short serial spine, because each step changes
+the schema the next one writes against.
+
+**The serial spine — one stream, in this order:**
+
+| Step | Why it blocks the next |
+|---|---|
+| 1. `Membership` replaces the one-to-one link | Nothing else can reference a member until members exist |
+| 2. `Store` level, one per existing business | Permissions carry a store dimension; writing them first means rewriting them |
+| 3. Feature registry and both gates | Modules and superadmin toggles both read it |
+
+Steps 1 and 2 could merge into a single migration. Treat them as one stream regardless — two people
+editing the same six tables is slower than one.
+
+**Streams that run in parallel with the spine, from day one:**
+
+| Stream | Work | Depends on |
+|---|---|---|
+| Hardening | Linter and formatter, per-username throttle, logo dimension cap, CSP, media to object storage | Nothing — start immediately |
+| Interface | Theme presets, CSS token set, PDF layout templates | Nothing |
+| Documents | `docs/SYSTEM_DESIGN.md` entries per decision | Written before each step, not after |
+
+**Streams that open once the spine lands:**
+
+| Stream | Opens after | Work |
+|---|---|---|
+| Superadmin | Step 1 | Onboarding, suspension, impersonation, platform log |
+| Modules | Step 3 | Registry UI, `/api/me` payload, navigation filtering |
+| Activity | Step 1 | Widen `action`, extend coverage, filters and pagination |
+| Recovery | Step 1 | Password reset (P6-F10–F13) |
+| Metrics | Step 2 | Cross-store dashboard |
+
+**Practical shape.** One developer takes the spine and nothing else. A second takes hardening first
+(it is independent and improves every subsequent diff), then superadmin once step 1 lands. Interface
+work can run on its own track throughout, since it touches presentation only.
+
+**The sequencing trap.** Do not start the new modules — `customers`, `inventory`, `sales` — until
+the spine is finished. Each would be written against a business-level scope and then rewritten
+against a store-level one.
 
 ---
 
@@ -897,6 +1107,10 @@ hooks/        useMediaQuery
 - Cross-app imports go one way: `purchasing` and `quotes` depend on `catalogue`, never the reverse.
   Where a reverse reference is unavoidable, it is a local import inside the function, with a comment.
 - Every non-obvious decision carries a comment explaining **why**, not what.
+- **Every change updates `docs/SYSTEM_DESIGN.md`** — the system design handbook — before the work
+  starts and again after it lands. It records, per decision: the question, the implementation, the
+  reasoning including rejected alternatives, and what breaks if the decision is reversed.
+  `CODEBASE_GUIDE.md` says what each file does; the handbook says why it is that way.
 
 ---
 
@@ -981,6 +1195,41 @@ consumer on a 512 MB box, and an out-of-memory kill presents as a 502).
 | 5 | Record an FX rate on purchases? | Two columns, cheap, high value under a moving naira. Add when the first dollar purchase is recorded |
 | 6 | Stay on Django 5.2 LTS or move to 6.x? | Stay on LTS; revisit at each LTS boundary as a decision, not drift |
 | 7 | Is per-line margin shown in the quote builder, or totals only? | Per line. Revisit if cost is being read over the seller's shoulder at a counter |
+| 8 | Is cost shared across stores, or held per store? | **Per store.** Branches that buy independently have different landed costs |
+| 9 | Do the other generic product types already exist elsewhere? | Unknown — this repo has only the cable catalogue. Determines whether P6-F34 imports models or defines them |
+| 10 | What exactly can a restricted business still do? | Reads yes, writes no, existing PDFs downloadable |
+
+### 17.4 Pre-platform audit — 23 Sep 2026
+
+A full audit ran before the platform work began: documentation, collaboration readiness,
+extensibility, standard practice and security. **No critical vulnerability was found.**
+
+Verified sound, and not to regress: tenant isolation is asserted with 404 tests in all four domain
+apps; CI runs a missing-migration check, 108 tests, `check --deploy`, `pip-audit`, `npm audit` and a
+Playwright end-to-end pass; settings fail closed; templates are fully autoescaped with no `|safe`,
+`mark_safe` or `dangerouslySetInnerHTML`; git history has never carried a secret, database or media
+file; bank changes are re-authenticated and audited.
+
+| # | Severity | Finding | Action |
+|---|---|---|---|
+| A1 | Medium | Login throttling is per-IP only (10/min). No per-username limit and no lockout | Add a per-username throttle. Before the spine |
+| A2 | Medium | No password reset exists. The sole owner can be locked out permanently | Already specified as P6-F10–F13. Must ship **with** members, not after |
+| A3 | Medium | Logo uploads cap bytes (2 MB) but not pixel dimensions; WeasyPrint renders the decompressed image in full | Cap dimensions on upload. Before the spine |
+| A4 | Low | `LogoutEverywhereView` scans every session row on the platform | Acceptable now; needs a per-user session index before tenant count grows |
+| A5 | Low | No Content-Security-Policy header | Add one |
+| A6 | Low | No email verification on registration | Matters once onboarding is operator-led |
+
+**Collaboration gaps**, in priority order:
+
+| Gap | Impact |
+|---|---|
+| No linter or formatter anywhere — no ruff, black, flake8, prettier or eslint | The largest gap. Style drift begins with the second contributor and every diff becomes noisy. Fix in one isolated formatting commit before anyone else commits |
+| No frontend unit tests | Only an end-to-end smoke script. `quoteMath.js` duplicates server arithmetic and is untested in isolation |
+| No coverage measurement | 108 tests, no signal about what is uncovered |
+| No `CONTRIBUTING.md`, PR template or `CODEOWNERS` | A new developer has no stated workflow |
+
+Documentation is not a gap: `CODEBASE_GUIDE.md` is thorough, and `docs/SYSTEM_DESIGN.md` now records
+the reasoning behind each decision (§15.5).
 
 ---
 
@@ -1039,3 +1288,4 @@ seeded — they vary too much between sellers.
 |---|---|---|
 | 1.0 | 13 Sep 2026 | First consolidated PRD. Phases 1–2 documented as built; 3–6 specified |
 | 1.1 | 15 Sep 2026 | Waybills from quotations and the manufacturer's logo built ahead of Phase 3 |
+| 1.2 | 23 Sep 2026 | Platform redesign. Phase 6 resequenced from last to next (§7) and rescoped to "Platform, multi-user and SaaS". Added: multiple stores per business (§13.5), modules with enable/disable per business (§13.6), product verticals (§13.7), superadmin (§13.8), interface customisation (§13.9), build plan and parallelisation (§13.12). Per-feature permissions replace fixed-role-only access (P6-F2a). Activity tracking specified (P6-F9a–e). Pre-platform audit recorded (§17.4). System design handbook made a standing convention (§15.5) |

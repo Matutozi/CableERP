@@ -1,6 +1,6 @@
 # CableERP
 
-A vertical ERP for cable distributors and sellers in Nigeria. **Phase 1 is the quote builder**: a seller sets up their business details and catalogue (cables and accessories) once, then builds a quotation on their phone in a minute and sends it to the customer as a PDF (WhatsApp, email, …). **Phase 2 adds cost and margin**: record what a delivery cost and every quote shows what it is worth making.
+A vertical ERP for cable distributors and sellers in Nigeria. **Phase 1 is the quote builder**: a seller sets up their business details and catalogue (cables and accessories) once, then builds a quotation on their phone in a minute and sends it to the customer as a PDF (WhatsApp, email, …). **Phase 2 adds cost and margin**: record what a delivery cost and every quote shows what it is worth making. **Waybills** turn a quote into the price-free delivery note the driver carries.
 
 It is multi-tenant from the start — any cable seller can register, and every catalogue entry and quote is scoped to the signed-in business.
 
@@ -174,6 +174,7 @@ Unauthenticated requests get `401`; requests for another business's data get `40
 
 ## Operations
 
+- **Deploying an update.** [`deploy/update.sh`](deploy/update.sh) — `sudo /srv/cableerp/deploy/update.sh` on a droplet already provisioned by `setup.sh`. It backs up, fast-forwards, migrates, rebuilds costs, builds the frontend and restarts, stopping on the first failure. Use `setup.sh` only to provision a new machine.
 - **Backups.** [`deploy/backup.sh`](deploy/backup.sh) dumps, compresses, verifies and prunes. Run it nightly from cron, and do the restore drill it documents monthly — an untested backup is not a backup.
 - **Error tracking.** Set `SENTRY_DSN` and errors are reported (personal data is not sent). Leave it blank and nothing leaves the server.
 - **CI.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the test suite against PostgreSQL, checks for missing migrations, runs `check --deploy`, audits both dependency trees, builds the frontend, and runs the browser smoke test against a seeded stack.

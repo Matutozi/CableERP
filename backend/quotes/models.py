@@ -42,7 +42,9 @@ class Quote(models.Model):
     staff_phone = models.CharField(max_length=50, blank=True)
     product_manufacturer = models.CharField(max_length=200, blank=True)
     transport_cost = models.DecimalField(
-        max_digits=15, decimal_places=2, default=Decimal("0"),
+        max_digits=15,
+        decimal_places=2,
+        default=Decimal("0"),
         validators=[MinValueValidator(0), MaxValueValidator(MAX_PRICE)],
     )
     vat_percentage = models.DecimalField(
@@ -52,7 +54,11 @@ class Quote(models.Model):
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
     sent_at = models.DateTimeField(null=True, blank=True, editable=False)
     revision_of = models.ForeignKey(
-        "self", null=True, blank=True, on_delete=models.SET_NULL, related_name="revisions",
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="revisions",
         help_text="The sent quote this one was raised to replace.",
     )
     # Copied from the business profile when the quote is written, so editing the profile later can never
@@ -66,7 +72,9 @@ class Quote(models.Model):
     class Meta:
         ordering = ["-created_at", "-id"]
         constraints = [
-            models.UniqueConstraint(fields=["business", "reference_number"], name="unique_quote_reference_per_business"),
+            models.UniqueConstraint(
+                fields=["business", "reference_number"], name="unique_quote_reference_per_business"
+            ),
         ]
 
     def __str__(self):
@@ -103,9 +111,16 @@ class Quote(models.Model):
         )
         for item in self.line_items.all():
             copy = QuoteLineItem.objects.create(
-                quote=revision, kind=item.kind, cable_size=item.cable_size, accessory=item.accessory,
-                cable_type_name=item.cable_type_name, size_label=item.size_label, item_name=item.item_name,
-                unit=item.unit, unit_price=item.unit_price, order=item.order,
+                quote=revision,
+                kind=item.kind,
+                cable_size=item.cable_size,
+                accessory=item.accessory,
+                cable_type_name=item.cable_type_name,
+                size_label=item.size_label,
+                item_name=item.item_name,
+                unit=item.unit,
+                unit_price=item.unit_price,
+                order=item.order,
             )
             QuoteLineItemColour.objects.bulk_create(
                 QuoteLineItemColour(line_item=copy, colour=entry.colour, quantity=entry.quantity)

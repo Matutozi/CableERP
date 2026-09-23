@@ -52,7 +52,7 @@ def landed_unit_costs(lines, additional_cost):
     total_weight = sum(weights)
 
     results = []
-    for (line_cost, quantity), weight in zip(lines, weights):
+    for (line_cost, quantity), weight in zip(lines, weights, strict=True):
         share = (additional_cost * weight / total_weight) if total_weight > 0 else (additional_cost / len(lines))
         # Per-unit cost is stored rather than a line total, so a fraction of a kobo can be lost
         # here. Four decimal places keep that below a kobo on any realistic delivery.
@@ -79,7 +79,7 @@ def allocate_landed_cost(purchase):
         return items
 
     landed = landed_unit_costs([(item.line_cost, item.sale_quantity) for item in items], purchase.additional_cost)
-    for item, value in zip(items, landed):
+    for item, value in zip(items, landed, strict=True):
         if out_of_range(value):
             raise CostOutOfRange(
                 f"{item.item_name}: ₦{value:,.2f} per unit sold. Check the quantity and the conversion."

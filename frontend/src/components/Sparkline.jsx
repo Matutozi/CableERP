@@ -15,13 +15,26 @@ export default function Sparkline({ points, colour = "var(--primary)", width = 7
   const y = (value) => height - pad - ((value - lowest) / span) * (height - pad * 2);
 
   return (
-    <svg className="sparkline" viewBox={`0 0 ${width} ${height}`} width={width} height={height} role="img" aria-label={label}>
+    <svg
+      className="sparkline"
+      viewBox={`0 0 ${width} ${height}`}
+      width={width}
+      height={height}
+      role="img"
+      aria-label={label}
+    >
       {values.length === 1 ? (
         <circle cx={width / 2} cy={height / 2} r="2.5" fill={colour} />
       ) : (
         <>
-          <polyline points={values.map((value, index) => `${x(index).toFixed(1)},${y(value).toFixed(1)}`).join(" ")}
-            fill="none" stroke={colour} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+          <polyline
+            points={values.map((value, index) => `${x(index).toFixed(1)},${y(value).toFixed(1)}`).join(" ")}
+            fill="none"
+            stroke={colour}
+            strokeWidth="1.6"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
           <circle cx={x(values.length - 1)} cy={y(values[values.length - 1])} r="2.6" fill={colour} />
         </>
       )}

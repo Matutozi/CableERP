@@ -40,7 +40,9 @@ class Waybill(models.Model):
     class Meta:
         ordering = ["-created_at", "-id"]
         constraints = [
-            models.UniqueConstraint(fields=["business", "reference_number"], name="unique_waybill_reference_per_business"),
+            models.UniqueConstraint(
+                fields=["business", "reference_number"], name="unique_waybill_reference_per_business"
+            ),
         ]
 
     def __str__(self):
@@ -73,9 +75,15 @@ class Waybill(models.Model):
             )
             for line in quote.line_items.all():
                 item = WaybillItem.objects.create(
-                    waybill=waybill, kind=line.kind, cable_size=line.cable_size, accessory=line.accessory,
-                    cable_type_name=line.cable_type_name, size_label=line.size_label, item_name=line.item_name,
-                    unit=line.unit, order=line.order,
+                    waybill=waybill,
+                    kind=line.kind,
+                    cable_size=line.cable_size,
+                    accessory=line.accessory,
+                    cable_type_name=line.cable_type_name,
+                    size_label=line.size_label,
+                    item_name=line.item_name,
+                    unit=line.unit,
+                    order=line.order,
                 )
                 WaybillItemColour.objects.bulk_create(
                     WaybillItemColour(item=item, colour=entry.colour, quantity=entry.quantity)
@@ -154,3 +162,6 @@ class WaybillItemColour(models.Model):
 
     class Meta:
         ordering = ["id"]
+
+    def __str__(self):
+        return f"{self.colour or 'NA'}: {self.quantity}"

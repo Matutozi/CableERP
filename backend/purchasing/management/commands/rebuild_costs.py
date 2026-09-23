@@ -35,8 +35,7 @@ class Command(BaseCommand):
         costed = sum(1 for row in rows if row.last_unit_cost is not None)
         self.stdout.write(
             self.style.SUCCESS(
-                f"Replayed {purchases.count()} deliveries. "
-                f"{costed} of {len(rows)} catalogue items now have a cost."
+                f"Replayed {purchases.count()} deliveries. {costed} of {len(rows)} catalogue items now have a cost."
             )
         )
         for problem in skipped:

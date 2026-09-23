@@ -26,7 +26,10 @@ function CableTypeForm({ initial, submitLabel, onSubmit, onCancel }) {
         name,
         unit,
         has_colour_variants: hasColours,
-        colour_options: colours.split(",").map((colour) => colour.trim()).filter(Boolean),
+        colour_options: colours
+          .split(",")
+          .map((colour) => colour.trim())
+          .filter(Boolean),
       });
     } catch (err) {
       setError(err.message);
@@ -39,28 +42,51 @@ function CableTypeForm({ initial, submitLabel, onSubmit, onCancel }) {
       {error && <div className="alert alert-error">{error}</div>}
       <div className="field-grid">
         <Field label="Name">
-          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Singles" required autoFocus />
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="e.g. Singles"
+            required
+            autoFocus
+          />
         </Field>
         <Field label="Sold per">
           <select value={unit} onChange={(event) => setUnit(event.target.value)}>
-            {CABLE_UNITS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            {CABLE_UNITS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
           </select>
         </Field>
         <Field label="Colours" as="div" wide>
           <label className="check">
-            <input type="checkbox" checked={hasColours} onChange={(event) => setHasColours(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={hasColours}
+              onChange={(event) => setHasColours(event.target.checked)}
+            />
             Sold in different colours
           </label>
           {hasColours && (
-            <input className="mt-8" value={colours} onChange={(event) => setColours(event.target.value)}
-              placeholder="Red, Black, Yellow/Green" aria-label="Colour options, separated by commas" />
+            <input
+              className="mt-8"
+              value={colours}
+              onChange={(event) => setColours(event.target.value)}
+              placeholder="Red, Black, Yellow/Green"
+              aria-label="Colour options, separated by commas"
+            />
           )}
           {hasColours && <span className="field-hint">Separate colours with commas.</span>}
         </Field>
       </div>
       <div className="form-actions">
-        <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
-        <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? "Saving…" : submitLabel}</button>
+        <button type="button" className="btn btn-secondary" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          {busy ? "Saving…" : submitLabel}
+        </button>
       </div>
     </form>
   );
@@ -78,7 +104,9 @@ function AddSizeForm({ cableType, onAdded, onClose }) {
     setBusy(true);
     setError("");
     try {
-      onAdded(await api.createSize(cableType.id, { size_label: label, default_price: toNumber(price).toFixed(2) }));
+      onAdded(
+        await api.createSize(cableType.id, { size_label: label, default_price: toNumber(price).toFixed(2) }),
+      );
       setLabel("");
       setPrice("");
       labelRef.current?.focus();
@@ -91,12 +119,29 @@ function AddSizeForm({ cableType, onAdded, onClose }) {
 
   return (
     <form className="inline-form" onSubmit={handleSubmit}>
-      <input ref={labelRef} value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Size, e.g. 2.5mm x 3C"
-        aria-label="New size" required autoFocus />
-      <MoneyInput value={price} onChange={setPrice} placeholder="Price" aria-label="New size price" required />
+      <input
+        ref={labelRef}
+        value={label}
+        onChange={(event) => setLabel(event.target.value)}
+        placeholder="Size, e.g. 2.5mm x 3C"
+        aria-label="New size"
+        required
+        autoFocus
+      />
+      <MoneyInput
+        value={price}
+        onChange={setPrice}
+        placeholder="Price"
+        aria-label="New size price"
+        required
+      />
       <div className="inline-form-actions">
-        <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? "Adding…" : "Add"}</button>
-        <button type="button" className="btn btn-secondary" onClick={onClose}>Done</button>
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          {busy ? "Adding…" : "Add"}
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={onClose}>
+          Done
+        </button>
       </div>
       {error && <div className="alert alert-error inline-form-error">{error}</div>}
     </form>
@@ -114,7 +159,11 @@ function CableTypeCard({ cableType, open, onToggle, onChange, onDelete }) {
   async function savePrice(size, price) {
     setError("");
     try {
-      const updated = await api.updateSize(size.id, { size_label: size.size_label, default_price: price, order: size.order });
+      const updated = await api.updateSize(size.id, {
+        size_label: size.size_label,
+        default_price: price,
+        order: size.order,
+      });
       updateSizes((sizes) => sizes.map((entry) => (entry.id === updated.id ? updated : entry)));
     } catch (err) {
       setError(err.message);
@@ -123,7 +172,8 @@ function CableTypeCard({ cableType, open, onToggle, onChange, onDelete }) {
   }
 
   async function deleteSize(size) {
-    if (!window.confirm(`Delete ${size.size_label} ${cableType.name}? Existing quotes are not affected.`)) return;
+    if (!window.confirm(`Delete ${size.size_label} ${cableType.name}? Existing quotes are not affected.`))
+      return;
     try {
       await api.deleteSize(size.id);
       updateSizes((sizes) => sizes.filter((entry) => entry.id !== size.id));
@@ -136,12 +186,16 @@ function CableTypeCard({ cableType, open, onToggle, onChange, onDelete }) {
     return (
       <section className="panel">
         <h2 className="panel-title">Edit {cableType.name}</h2>
-        <CableTypeForm initial={cableType} submitLabel="Save changes" onCancel={() => setEditing(false)}
+        <CableTypeForm
+          initial={cableType}
+          submitLabel="Save changes"
+          onCancel={() => setEditing(false)}
           onSubmit={async (data) => {
             const updated = await api.updateCableType(cableType.id, { ...data, order: cableType.order });
             onChange(() => updated);
             setEditing(false);
-          }} />
+          }}
+        />
       </section>
     );
   }
@@ -151,7 +205,9 @@ function CableTypeCard({ cableType, open, onToggle, onChange, onDelete }) {
     `${cableType.sizes.length} ${cableType.sizes.length === 1 ? "size" : "sizes"}`,
     prices.length ? `₦${formatNaira(Math.min(...prices))}–₦${formatNaira(Math.max(...prices))}` : null,
     `per ${unitLabel(cableType.unit, 1)}`,
-  ].filter(Boolean).join(", ");
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     <div className="acc">
@@ -161,27 +217,48 @@ function CableTypeCard({ cableType, open, onToggle, onChange, onDelete }) {
           <span className="acc-sub">{summary}</span>
         </span>
         {cableType.has_colour_variants && <span className="badge badge-neutral">Colour variants</span>}
-        <span className={open ? "chevron open" : "chevron"}><Icon name="chevron" size={14} strokeWidth={1.6} /></span>
+        <span className={open ? "chevron open" : "chevron"}>
+          <Icon name="chevron" size={14} strokeWidth={1.6} />
+        </span>
       </button>
 
       {open && (
         <div className="acc-body">
           {error && <div className="alert alert-error">{error}</div>}
           {cableType.has_colour_variants && (
-            <div className="chips">{cableType.colour_options.map((colour) => <span key={colour} className="chip">{colour}</span>)}</div>
+            <div className="chips">
+              {cableType.colour_options.map((colour) => (
+                <span key={colour} className="chip">
+                  {colour}
+                </span>
+              ))}
+            </div>
           )}
           {cableType.sizes.map((size) => (
             <Fragment key={size.id}>
               <div className="list-row">
-                <button type="button" className="list-row-name cost-toggle" aria-expanded={trendFor === size.id}
+                <button
+                  type="button"
+                  className="list-row-name cost-toggle"
+                  aria-expanded={trendFor === size.id}
                   title="Show how this price and its cost have moved"
-                  onClick={() => setTrendFor(trendFor === size.id ? null : size.id)}>
+                  onClick={() => setTrendFor(trendFor === size.id ? null : size.id)}
+                >
                   <span className="cost-toggle-name">{size.size_label}</span>
                   <CostNote row={size} unit={unitLabel(cableType.unit, 1)} />
                 </button>
                 <span className="list-row-actions">
-                  <InlinePrice price={size.default_price} label={`Price for ${size.size_label}`} onSave={(price) => savePrice(size, price)} />
-                  <button type="button" className="icon-btn icon-btn-danger" aria-label={`Delete ${size.size_label}`} onClick={() => deleteSize(size)}>
+                  <InlinePrice
+                    price={size.default_price}
+                    label={`Price for ${size.size_label}`}
+                    onSave={(price) => savePrice(size, price)}
+                  />
+                  <button
+                    type="button"
+                    className="icon-btn icon-btn-danger"
+                    aria-label={`Delete ${size.size_label}`}
+                    onClick={() => deleteSize(size)}
+                  >
                     <Icon name="trash" size={14} />
                   </button>
                 </span>
@@ -191,16 +268,24 @@ function CableTypeCard({ cableType, open, onToggle, onChange, onDelete }) {
           ))}
           {cableType.sizes.length === 0 && !addingSize && <p className="list-empty">No sizes yet.</p>}
           {addingSize ? (
-            <AddSizeForm cableType={cableType} onClose={() => setAddingSize(false)}
-              onAdded={(size) => updateSizes((sizes) => [...sizes, size])} />
+            <AddSizeForm
+              cableType={cableType}
+              onClose={() => setAddingSize(false)}
+              onAdded={(size) => updateSizes((sizes) => [...sizes, size])}
+            />
           ) : (
             <button type="button" className="btn-link" onClick={() => setAddingSize(true)}>
-              <Icon name="plus" size={14} strokeWidth={1.7} />Add size
+              <Icon name="plus" size={14} strokeWidth={1.7} />
+              Add size
             </button>
           )}
           <div className="acc-foot">
-            <button type="button" className="btn-link btn-link-muted" onClick={() => setEditing(true)}>Edit type</button>
-            <button type="button" className="btn-link btn-link-danger" onClick={onDelete}>Delete type</button>
+            <button type="button" className="btn-link btn-link-muted" onClick={() => setEditing(true)}>
+              Edit type
+            </button>
+            <button type="button" className="btn-link btn-link-danger" onClick={onDelete}>
+              Delete type
+            </button>
           </div>
         </div>
       )}
@@ -215,7 +300,8 @@ export default function Catalogue() {
   const [openId, setOpenId] = useState(null);
 
   useEffect(() => {
-    api.listCableTypes()
+    api
+      .listCableTypes()
       .then((list) => {
         setTypes(list);
         setOpenId(list[0]?.id ?? null);
@@ -223,7 +309,8 @@ export default function Catalogue() {
       .catch((err) => setError(err.message));
   }, []);
 
-  const changeType = (id) => (update) => setTypes((current) => current.map((type) => (type.id === id ? update(type) : type)));
+  const changeType = (id) => (update) =>
+    setTypes((current) => current.map((type) => (type.id === id ? update(type) : type)));
 
   async function createType(data) {
     const created = await api.createCableType(data);
@@ -233,7 +320,8 @@ export default function Catalogue() {
   }
 
   async function deleteType(cableType) {
-    if (!window.confirm(`Delete ${cableType.name} and all its sizes? Existing quotes are not affected.`)) return;
+    if (!window.confirm(`Delete ${cableType.name} and all its sizes? Existing quotes are not affected.`))
+      return;
     try {
       await api.deleteCableType(cableType.id);
       setTypes((current) => current.filter((type) => type.id !== cableType.id));
@@ -245,14 +333,25 @@ export default function Catalogue() {
   return (
     <div className="page">
       <CatalogueHeader
-        action={!adding && <button type="button" className="btn btn-secondary" onClick={() => setAdding(true)}>Add type</button>} />
+        action={
+          !adding && (
+            <button type="button" className="btn btn-secondary" onClick={() => setAdding(true)}>
+              Add type
+            </button>
+          )
+        }
+      />
 
       {error && <div className="alert alert-error">{error}</div>}
 
       {adding && (
         <section className="panel">
           <h2 className="panel-title">New cable type</h2>
-          <CableTypeForm submitLabel="Add cable type" onSubmit={createType} onCancel={() => setAdding(false)} />
+          <CableTypeForm
+            submitLabel="Add cable type"
+            onSubmit={createType}
+            onCancel={() => setAdding(false)}
+          />
         </section>
       )}
 
@@ -263,9 +362,14 @@ export default function Catalogue() {
       ) : (
         <div className="acc-list">
           {types.map((cableType) => (
-            <CableTypeCard key={cableType.id} cableType={cableType} open={openId === cableType.id}
+            <CableTypeCard
+              key={cableType.id}
+              cableType={cableType}
+              open={openId === cableType.id}
               onToggle={() => setOpenId(openId === cableType.id ? null : cableType.id)}
-              onChange={changeType(cableType.id)} onDelete={() => deleteType(cableType)} />
+              onChange={changeType(cableType.id)}
+              onDelete={() => deleteType(cableType)}
+            />
           ))}
         </div>
       )}

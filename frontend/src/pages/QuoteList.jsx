@@ -15,16 +15,20 @@ export default function QuoteList() {
   // Searching and paging happen on the server, so a long history stays fast.
   useEffect(() => {
     let cancelled = false;
-    const timer = setTimeout(() => {
-      api.listQuotes({ search })
-        .then((page) => {
-          if (cancelled) return;
-          setQuotes(page.results);
-          setCount(page.count);
-          setNextPage(page.next ? 2 : null);
-        })
-        .catch((err) => !cancelled && setError(err.message));
-    }, search ? 300 : 0);
+    const timer = setTimeout(
+      () => {
+        api
+          .listQuotes({ search })
+          .then((page) => {
+            if (cancelled) return;
+            setQuotes(page.results);
+            setCount(page.count);
+            setNextPage(page.next ? 2 : null);
+          })
+          .catch((err) => !cancelled && setError(err.message));
+      },
+      search ? 300 : 0,
+    );
     return () => {
       cancelled = true;
       clearTimeout(timer);
@@ -51,18 +55,28 @@ export default function QuoteList() {
         <div>
           <h1>Quotes</h1>
           <div className="page-sub">
-            {quotes === null ? "\u00a0" : `${count} ${count === 1 ? "quote" : "quotes"}${search ? " found" : ""}`}
+            {quotes === null
+              ? "\u00a0"
+              : `${count} ${count === 1 ? "quote" : "quotes"}${search ? " found" : ""}`}
           </div>
         </div>
-        <Link className="btn btn-primary" to="/quotes/new">New quote</Link>
+        <Link className="btn btn-primary" to="/quotes/new">
+          New quote
+        </Link>
       </div>
       <DocumentTabs />
 
       {error && <div className="alert alert-error">{error}</div>}
 
       {(search || (quotes?.length ?? 0) > 0) && (
-        <input className="search" type="search" placeholder="Search by customer or reference" value={search}
-          onChange={(event) => setSearch(event.target.value)} aria-label="Search quotes" />
+        <input
+          className="search"
+          type="search"
+          placeholder="Search by customer or reference"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          aria-label="Search quotes"
+        />
       )}
 
       {quotes === null ? (

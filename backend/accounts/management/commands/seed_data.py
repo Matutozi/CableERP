@@ -21,17 +21,47 @@ PROFILE = {
 
 # (cable type, unit, colour options, [(size, default price), ...])
 CATALOGUE = [
-    ("Singles", CableType.Unit.COIL, ["Red", "Black", "Yellow/Green"], [
-        ("1mm", 23500), ("1.5mm", 33000), ("2.5mm", 54000), ("4mm", 87500), ("6mm", 133000),
-        ("10mm", 216000), ("16mm", 338000), ("25mm", 543500), ("35mm", 743000),
-    ]),
-    ("Flat", CableType.Unit.COIL, [], [
-        ("1mm x 2C", 66500), ("1mm x 3C", 100000), ("1.5mm x 3C", 137000), ("2.5mm x 3C", 208500),
-    ]),
-    ("Flex", CableType.Unit.COIL, [], [
-        ("1.5mm x 3C", 187000), ("1.5mm x 4C", 244500), ("2.5mm x 3C", 280500), ("2.5mm x 4C", 371500),
-        ("4mm x 3C", 420000), ("4mm x 4C", 557500), ("6mm x 4C", 802500),
-    ]),
+    (
+        "Singles",
+        CableType.Unit.COIL,
+        ["Red", "Black", "Yellow/Green"],
+        [
+            ("1mm", 23500),
+            ("1.5mm", 33000),
+            ("2.5mm", 54000),
+            ("4mm", 87500),
+            ("6mm", 133000),
+            ("10mm", 216000),
+            ("16mm", 338000),
+            ("25mm", 543500),
+            ("35mm", 743000),
+        ],
+    ),
+    (
+        "Flat",
+        CableType.Unit.COIL,
+        [],
+        [
+            ("1mm x 2C", 66500),
+            ("1mm x 3C", 100000),
+            ("1.5mm x 3C", 137000),
+            ("2.5mm x 3C", 208500),
+        ],
+    ),
+    (
+        "Flex",
+        CableType.Unit.COIL,
+        [],
+        [
+            ("1.5mm x 3C", 187000),
+            ("1.5mm x 4C", 244500),
+            ("2.5mm x 3C", 280500),
+            ("2.5mm x 4C", 371500),
+            ("4mm x 3C", 420000),
+            ("4mm x 4C", 557500),
+            ("6mm x 4C", 802500),
+        ],
+    ),
     ("Other", CableType.Unit.COIL, [], [("RG6 Coaxial", 67500), ("Cat6 Ethernet", 293500)]),
     ("Armoured", CableType.Unit.METRE, [], [("16mm", 57500)]),
     ("Retlin", CableType.Unit.METRE, [], []),
@@ -39,7 +69,9 @@ CATALOGUE = [
 
 
 class Command(BaseCommand):
-    help = "Create the Acme-Oaks Ventures Limited account with its business profile and cable catalogue. Safe to re-run."
+    help = (
+        "Create the Acme-Oaks Ventures Limited account with its business profile and cable catalogue. Safe to re-run."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument("--username", default="acmeoaks")
@@ -47,7 +79,9 @@ class Command(BaseCommand):
         parser.add_argument(
             "--reset-prices",
             action="store_true",
-            help="Overwrite existing size prices with the seed defaults. Without this, prices you have edited are kept.",
+            help=(
+                "Overwrite existing size prices with the seed defaults. Without this, prices you have edited are kept."
+            ),
         )
 
     @transaction.atomic
@@ -91,4 +125,6 @@ class Command(BaseCommand):
                 # price in it. record_price is a no-op when the price has not moved.
                 record_price(size)
 
-        self.stdout.write(self.style.SUCCESS(f"Seeded {profile.business_name}: {profile.cable_types.count()} cable types."))
+        self.stdout.write(
+            self.style.SUCCESS(f"Seeded {profile.business_name}: {profile.cable_types.count()} cable types.")
+        )

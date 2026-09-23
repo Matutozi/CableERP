@@ -21,7 +21,12 @@ class CatalogueTests(APITestCase):
     def test_create_cable_type_and_sizes(self):
         response = self.client.post(
             "/api/cable-types/",
-            {"name": " Singles ", "unit": "coil", "has_colour_variants": True, "colour_options": ["Red", " Black ", "red", ""]},
+            {
+                "name": " Singles ",
+                "unit": "coil",
+                "has_colour_variants": True,
+                "colour_options": ["Red", " Black ", "red", ""],
+            },
             format="json",
         )
         self.assertEqual(response.status_code, 201)
@@ -29,18 +34,26 @@ class CatalogueTests(APITestCase):
         self.assertEqual(response.data["colour_options"], ["Red", "Black"])
         type_id = response.data["id"]
 
-        first = self.client.post(f"/api/cable-types/{type_id}/sizes/", {"size_label": "1.5mm", "default_price": "33000"}, format="json")
-        second = self.client.post(f"/api/cable-types/{type_id}/sizes/", {"size_label": "2.5mm", "default_price": "54000"}, format="json")
+        first = self.client.post(
+            f"/api/cable-types/{type_id}/sizes/", {"size_label": "1.5mm", "default_price": "33000"}, format="json"
+        )
+        second = self.client.post(
+            f"/api/cable-types/{type_id}/sizes/", {"size_label": "2.5mm", "default_price": "54000"}, format="json"
+        )
         self.assertEqual(first.status_code, 201)
         self.assertLess(first.data["order"], second.data["order"])
 
-        duplicate = self.client.post(f"/api/cable-types/{type_id}/sizes/", {"size_label": "1.5MM", "default_price": "1"}, format="json")
+        duplicate = self.client.post(
+            f"/api/cable-types/{type_id}/sizes/", {"size_label": "1.5MM", "default_price": "1"}, format="json"
+        )
         self.assertEqual(duplicate.status_code, 400)
 
         sizes = self.client.get(f"/api/cable-types/{type_id}/sizes/").data
         self.assertEqual([s["size_label"] for s in sizes], ["1.5mm", "2.5mm"])
 
-        response = self.client.put(f"/api/sizes/{first.data['id']}/", {"size_label": "1.5mm", "default_price": "35000.50"}, format="json")
+        response = self.client.put(
+            f"/api/sizes/{first.data['id']}/", {"size_label": "1.5mm", "default_price": "35000.50"}, format="json"
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["default_price"], "35000.50")
 
@@ -50,7 +63,9 @@ class CatalogueTests(APITestCase):
 
     def test_colour_variants_need_colours(self):
         response = self.client.post(
-            "/api/cable-types/", {"name": "Singles", "unit": "coil", "has_colour_variants": True, "colour_options": []}, format="json"
+            "/api/cable-types/",
+            {"name": "Singles", "unit": "coil", "has_colour_variants": True, "colour_options": []},
+            format="json",
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("colour_options", response.data)
@@ -62,7 +77,9 @@ class CatalogueTests(APITestCase):
 
     def test_accessories(self):
         socket = self.client.post(
-            "/api/accessories/", {"name": " 13A Switched Socket ", "unit": "piece", "default_price": "2500"}, format="json"
+            "/api/accessories/",
+            {"name": " 13A Switched Socket ", "unit": "piece", "default_price": "2500"},
+            format="json",
         )
         self.assertEqual(socket.status_code, 201, socket.data)
         self.assertEqual(socket.data["name"], "13A Switched Socket")
@@ -71,9 +88,13 @@ class CatalogueTests(APITestCase):
         )
         self.assertLess(socket.data["order"], conduit.data["order"])
 
-        duplicate = self.client.post("/api/accessories/", {"name": "13a switched socket", "default_price": "1"}, format="json")
+        duplicate = self.client.post(
+            "/api/accessories/", {"name": "13a switched socket", "default_price": "1"}, format="json"
+        )
         self.assertEqual(duplicate.status_code, 400)
-        bad_unit = self.client.post("/api/accessories/", {"name": "Tape", "unit": "coil", "default_price": "1"}, format="json")
+        bad_unit = self.client.post(
+            "/api/accessories/", {"name": "Tape", "unit": "coil", "default_price": "1"}, format="json"
+        )
         self.assertEqual(bad_unit.status_code, 400)
 
         updated = self.client.put(
@@ -90,7 +111,9 @@ class CatalogueTests(APITestCase):
     def test_prices_have_a_ceiling(self):
         cable_type = CableType.objects.create(business=self.business, name="Singles")
         too_big = self.client.post(
-            f"/api/cable-types/{cable_type.id}/sizes/", {"size_label": "1.5mm", "default_price": "9999999999999"}, format="json"
+            f"/api/cable-types/{cable_type.id}/sizes/",
+            {"size_label": "1.5mm", "default_price": "9999999999999"},
+            format="json",
         )
         self.assertEqual(too_big.status_code, 400)
         accessory = self.client.post(
@@ -107,8 +130,18 @@ class CatalogueTests(APITestCase):
         self.assertEqual(self.client.get("/api/cable-types/").data, [])
         self.assertEqual(self.client.get("/api/accessories/").data, [])
         self.assertEqual(self.client.get(f"/api/cable-types/{other_type.id}/").status_code, 404)
-        self.assertEqual(self.client.post(f"/api/cable-types/{other_type.id}/sizes/", {"size_label": "x", "default_price": 1}, format="json").status_code, 404)
-        self.assertEqual(self.client.put(f"/api/sizes/{other_size.id}/", {"size_label": "x", "default_price": 1}, format="json").status_code, 404)
+        self.assertEqual(
+            self.client.post(
+                f"/api/cable-types/{other_type.id}/sizes/", {"size_label": "x", "default_price": 1}, format="json"
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.put(
+                f"/api/sizes/{other_size.id}/", {"size_label": "x", "default_price": 1}, format="json"
+            ).status_code,
+            404,
+        )
         self.assertEqual(self.client.delete(f"/api/cable-types/{other_type.id}/").status_code, 404)
         self.assertEqual(self.client.delete(f"/api/accessories/{other_accessory.id}/").status_code, 404)
 
@@ -126,7 +159,9 @@ class PriceHistoryTests(APITestCase):
         self.client.force_authenticate(self.user)
         self.cable_type = CableType.objects.create(business=self.business, name="Flex", unit="coil")
         created = self.client.post(
-            f"/api/cable-types/{self.cable_type.id}/sizes/", {"size_label": "2.5mm", "default_price": "90000"}, format="json"
+            f"/api/cable-types/{self.cable_type.id}/sizes/",
+            {"size_label": "2.5mm", "default_price": "90000"},
+            format="json",
         )
         self.size_id = created.data["id"]
 
@@ -142,20 +177,27 @@ class PriceHistoryTests(APITestCase):
 
     def test_every_price_change_adds_a_point(self):
         for price in ("95000", "99000"):
-            self.client.put(f"/api/sizes/{self.size_id}/", {"size_label": "2.5mm", "default_price": price}, format="json")
+            self.client.put(
+                f"/api/sizes/{self.size_id}/", {"size_label": "2.5mm", "default_price": price}, format="json"
+            )
         history = self.history(f"/api/sizes/{self.size_id}/history/")
         self.assertEqual([point["value"] for point in history["price"]], ["90000.00", "95000.00", "99000.00"])
 
     def test_saving_the_same_price_again_is_not_a_change(self):
         self.client.put(f"/api/sizes/{self.size_id}/", {"size_label": "2.5mm", "default_price": "90000"}, format="json")
-        self.client.put(f"/api/sizes/{self.size_id}/", {"size_label": "2.5mm renamed", "default_price": "90000"}, format="json")
+        self.client.put(
+            f"/api/sizes/{self.size_id}/", {"size_label": "2.5mm renamed", "default_price": "90000"}, format="json"
+        )
         self.assertEqual(len(self.history(f"/api/sizes/{self.size_id}/history/")["price"]), 1)
 
     def test_purchases_show_up_as_the_cost_series(self):
         for date, cost in (("2026-08-01", "70000"), ("2026-09-01", "80000")):
             response = self.client.post(
                 "/api/purchases/",
-                {"date": date, "items": [{"cable_size": self.size_id, "quantity": "2", "entry_unit": "coil", "unit_cost": cost}]},
+                {
+                    "date": date,
+                    "items": [{"cable_size": self.size_id, "quantity": "2", "entry_unit": "coil", "unit_cost": cost}],
+                },
                 format="json",
             )
             self.assertEqual(response.status_code, 201, response.data)
@@ -165,9 +207,13 @@ class PriceHistoryTests(APITestCase):
         self.assertEqual(history["cost"][0]["quantity"], "2.00")
 
     def test_accessories_keep_a_history_too(self):
-        created = self.client.post("/api/accessories/", {"name": "13A socket", "unit": "piece", "default_price": "2500"}, format="json")
+        created = self.client.post(
+            "/api/accessories/", {"name": "13A socket", "unit": "piece", "default_price": "2500"}, format="json"
+        )
         self.client.put(
-            f"/api/accessories/{created.data['id']}/", {"name": "13A socket", "unit": "piece", "default_price": "2800"}, format="json"
+            f"/api/accessories/{created.data['id']}/",
+            {"name": "13A socket", "unit": "piece", "default_price": "2800"},
+            format="json",
         )
         history = self.history(f"/api/accessories/{created.data['id']}/history/")
         self.assertEqual([point["value"] for point in history["price"]], ["2500.00", "2800.00"])
@@ -192,7 +238,10 @@ class PriceMovementTests(APITestCase):
     def buy(self, size, cost, date):
         response = self.client.post(
             "/api/purchases/",
-            {"date": date, "items": [{"cable_size": size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": cost}]},
+            {
+                "date": date,
+                "items": [{"cable_size": size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": cost}],
+            },
             format="json",
         )
         self.assertEqual(response.status_code, 201, response.data)
@@ -254,8 +303,10 @@ class UnitChangeTests(APITestCase):
     def buy(self):
         response = self.client.post(
             "/api/purchases/",
-            {"date": "2026-09-01", "items": [
-                {"cable_size": self.size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": "70000"}]},
+            {
+                "date": "2026-09-01",
+                "items": [{"cable_size": self.size.pk, "quantity": "1", "entry_unit": "coil", "unit_cost": "70000"}],
+            },
             format="json",
         )
         self.assertEqual(response.status_code, 201, response.data)
@@ -284,10 +335,18 @@ class UnitChangeTests(APITestCase):
 
     def test_the_same_rule_covers_accessories(self):
         accessory = Accessory.objects.create(business=self.business, name="Tape", unit="roll", default_price="500")
-        self.client.post("/api/purchases/", {"date": "2026-09-01", "items": [
-            {"accessory": accessory.pk, "quantity": "10", "entry_unit": "roll", "unit_cost": "400"}]}, format="json")
+        self.client.post(
+            "/api/purchases/",
+            {
+                "date": "2026-09-01",
+                "items": [{"accessory": accessory.pk, "quantity": "10", "entry_unit": "roll", "unit_cost": "400"}],
+            },
+            format="json",
+        )
         response = self.client.put(
-            f"/api/accessories/{accessory.id}/", {"name": "Tape", "unit": "piece", "default_price": "500"}, format="json"
+            f"/api/accessories/{accessory.id}/",
+            {"name": "Tape", "unit": "piece", "default_price": "500"},
+            format="json",
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("per roll", str(response.data))

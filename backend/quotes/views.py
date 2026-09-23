@@ -9,7 +9,6 @@ from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 
 from accounts.models import AuditLog, BusinessProfile, naira, record
-
 from accounts.utils import get_business
 
 from .models import Quote
@@ -50,8 +49,13 @@ class QuoteViewSet(viewsets.ModelViewSet):
         return {**super().get_serializer_context(), "business": get_business(self.request)}
 
     def _record(self, quote, action):
-        record(quote.business, self.request.user, action,
-               f"{quote.customer_name} · {naira(quote.grand_total)}", reference=quote.reference_number)
+        record(
+            quote.business,
+            self.request.user,
+            action,
+            f"{quote.customer_name} · {naira(quote.grand_total)}",
+            reference=quote.reference_number,
+        )
 
     def perform_create(self, serializer):
         self._record(serializer.save(), AuditLog.Action.QUOTE_CREATED)
@@ -64,9 +68,7 @@ class QuoteViewSet(viewsets.ModelViewSet):
 
     def perform_destroy(self, instance):
         if instance.is_locked:
-            raise ValidationError(
-                "A sent quote is the record of what the customer received, so it can't be deleted."
-            )
+            raise ValidationError("A sent quote is the record of what the customer received, so it can't be deleted.")
         self._record(instance, AuditLog.Action.QUOTE_DELETED)
         instance.delete()
 
@@ -79,8 +81,13 @@ class QuoteViewSet(viewsets.ModelViewSet):
             BusinessProfile.objects.select_for_update().get(pk=quote.business_id)
             revision = quote.create_revision()
         revision = self.get_queryset().get(pk=revision.pk)
-        record(revision.business, request.user, AuditLog.Action.QUOTE_REVISED,
-               f"{revision.reference_number} replaces {quote.reference_number}", reference=revision.reference_number)
+        record(
+            revision.business,
+            request.user,
+            AuditLog.Action.QUOTE_REVISED,
+            f"{revision.reference_number} replaces {quote.reference_number}",
+            reference=revision.reference_number,
+        )
         return Response(self.get_serializer(revision).data, status=201)
 
     @action(detail=True, methods=["get"], throttle_classes=[PdfRateThrottle])
