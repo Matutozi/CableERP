@@ -8,16 +8,7 @@ from django.db import transaction
 from PIL import Image
 from rest_framework import serializers
 
-from .models import (
-    DEFAULT_STORE_CODE,
-    DEFAULT_STORE_NAME,
-    AuditLog,
-    BusinessProfile,
-    Membership,
-    Role,
-    Store,
-    record,
-)
+from .models import AuditLog, BusinessProfile, provision_business, record
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -80,12 +71,10 @@ class RegisterSerializer(serializers.Serializer):
             last_name=last_name.strip(),
         )
         business = BusinessProfile.objects.create(user=user, business_name=validated_data["business_name"].strip())
-        # Onboarding creates the whole spine, not just the profile. Without the membership a new
-        # business falls through to the legacy one-to-one in get_business(), which is a fallback
-        # for businesses that predate Membership — not a path anything new should take. Without
-        # the store there is nothing for quotes and purchases to belong to (PRD P6-F21).
-        Membership.create_with_role(business, user, Role.OWNER)
-        Store.objects.create(business=business, name=DEFAULT_STORE_NAME, code=DEFAULT_STORE_CODE)
+        # Role templates, an owner membership and the first store. Without them a new business
+        # falls through to the legacy one-to-one in get_business() and has nothing to invite
+        # anyone with.
+        provision_business(business, user)
         return user
 
 

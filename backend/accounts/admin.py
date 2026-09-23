@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AuditLog, BusinessProfile, Membership, Store
+from .models import AuditLog, BusinessProfile, Invitation, Membership, RoleTemplate, Store
 
 
 class StoreInline(admin.TabularInline):
@@ -33,12 +33,34 @@ class StoreAdmin(admin.ModelAdmin):
     search_fields = ["name", "code", "business__business_name"]
 
 
+@admin.register(RoleTemplate)
+class RoleTemplateAdmin(admin.ModelAdmin):
+    list_display = ["name", "business", "is_system", "permission_count"]
+    list_filter = ["is_system"]
+    search_fields = ["name", "business__business_name"]
+
+    @admin.display(description="Permissions")
+    def permission_count(self, template):
+        return len(template.permissions)
+
+
 @admin.register(Membership)
 class MembershipAdmin(admin.ModelAdmin):
-    list_display = ["user", "business", "role", "status", "created_at"]
-    list_filter = ["role", "status"]
-    search_fields = ["user__username", "business__business_name"]
+    list_display = ["user", "business", "role_label", "is_owner", "all_stores", "status", "created_at"]
+    list_filter = ["status", "is_owner", "all_stores"]
+    search_fields = ["user__username", "business__business_name", "role_label"]
     readonly_fields = ["created_at", "updated_at"]
+    filter_horizontal = ["stores"]
+
+
+@admin.register(Invitation)
+class InvitationAdmin(admin.ModelAdmin):
+    list_display = ["email", "phone", "business", "role_label", "status", "expires_at", "accepted_at"]
+    search_fields = ["email", "phone", "business__business_name"]
+    # The token is stored hashed and is useless here; showing it would only imply it is recoverable.
+    exclude = ["token_hash"]
+    readonly_fields = ["created_at", "accepted_at"]
+    filter_horizontal = ["stores"]
 
 
 @admin.register(AuditLog)

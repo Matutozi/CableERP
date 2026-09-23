@@ -231,6 +231,80 @@ not two.
 **Breaks if changed:** Auto-deactivating the newest or lowest-numbered store to fit silently
 detaches a branch's documents and cost history, with no record of who decided it or why.
 
+### Q23. How is a member's store access expressed, and why both a flag and a set?
+**Where:** `accounts/models.py:Membership.all_stores` + `Membership.stores` *(being built)*
+**Decision:** Two fields. `all_stores` is a stored boolean meaning every store in the business,
+including ones created later. `stores` is a many-to-many holding an explicit subset, used when
+`all_stores` is false. Both are filled from the role preset at invite time and then stored, exactly
+as `permissions` is.
+**Reasoning:** The requirement is that staff cannot see another branch's trade, because
+cross-branch visibility is how a person builds a picture of a business they have no business
+having. A single nullable FK was the first design and is wrong: a manager may cover Ikeja and
+Surulere but not Aba, which is neither "one" nor "all". The owner picks stores the way you would
+pick tags.
+The boolean is not redundant with an empty set. "Every store" and "these three stores that happen
+to be all of them today" behave differently the moment a fourth store opens: an owner must see it
+without anyone editing their membership, and a regional manager must not. Encoding "all" as an
+empty set would make new stores silently visible to everyone, which is the opposite of the
+requirement.
+Deriving scope from `role` at query time was rejected for the reason Q19 gives: changing what
+"manager" implies later would silently rescope every existing manager.
+**Breaks if changed:** Collapsing the two fields into one makes opening a new branch either invisible
+to its owner or instantly visible to every member scoped to "all the stores that existed then".
+
+### Q26. Why are roles per-business templates instead of three fixed values?
+**Where:** `accounts/models.py:RoleTemplate`, seeded by `provision_business()`
+**Decision:** `Role` is no longer an enum. Each business owns a set of named `RoleTemplate` rows,
+seeded with Owner, Manager and Sales, which it may rename, edit and extend — "Cashier",
+"Storekeeper", whatever its org chart is. Choosing one at invite time **copies** its permissions
+onto the membership; the template is never consulted afterwards.
+**Reasoning:** Three hard-coded roles imposed one org chart on every business on the platform. A
+market trader with two nephews on the counter and a distributor with a warehouse manager, cashiers
+and drivers do not share a structure, and a product that makes them pick the nearest of three words
+is wrong for most of them. Making templates per-business also keeps the Q19 property intact and
+scopes it properly: editing the "Cashier" template next month changes what *new* cashiers start
+with, never what existing ones can do.
+`is_owner` became a stored boolean at the same time, because "owner" can no longer be recognised
+from the role name once the name is the business's to choose.
+Two guards exist because this is the one area where a business can lock itself out: the Owner
+template must keep `manage_members`, and system templates cannot be deleted.
+**Breaks if changed:** Reverting to a global enum forces every business onto one vocabulary.
+Consulting the template at access time instead of copying makes every template edit a retroactive
+grant across everyone who ever held it — Q19's failure, re-introduced one level up.
+
+### Q25. Why does an invitation hold the intended access rather than creating the membership up front?
+**Where:** `accounts/models.py:Invitation` *(being built)*
+**Decision:** An invitation stores the business, the role, the permission set, the store scope and a
+hashed single-use token. The `Membership` is created only when the person accepts and sets a
+password. The staff list a business owner sees merges active memberships with pending invitations.
+**Reasoning:** A membership points at a `User`, and the invited person has no account until they
+accept, so a membership created up front would need a null user — which breaks the one-membership-
+per-user constraint and puts a half-real row in the table every permission check has to skip.
+Keeping the intended access on the invitation means the owner still configures everything at invite
+time, as they asked; the record just lives somewhere honest until there is a person to attach it to.
+The token is stored hashed, matching the `PasswordReset.code_hash` pattern the PRD already uses: an
+invitation link grants access to a business's data, so a database leak should not be a set of
+working keys. Resending therefore issues a new token rather than re-sending the old one.
+**Breaks if changed:** A nullable `Membership.user` makes every access check carry a "and the user
+exists" clause, and the unique constraint stops protecting against duplicate memberships.
+
+### Q24. Why is discounting a per-business policy instead of one rule?
+**Where:** `accounts/models.py:BusinessProfile.discount_policy` *(being built)*, enforced in
+`quotes/serializers.py`
+**Decision:** Four modes — `free` (default), `logged`, `capped` (with `max_discount_percent`),
+`none` — chosen by the business owner. The policy binds only members without `CATALOGUE_EDIT`.
+**Reasoning:** `unit_price` is per-line and client-supplied, so hiding cost stops a salesperson
+knowing the floor but not selling beneath it. That is the actual fraud route, and the right control
+for it differs by business: a trader with two family members on the counter wants nothing in the
+way, a distributor with salaried staff wants a hard cap. Picking one would make the product wrong
+for the other half of the market. `free` is the default because it is the current behaviour, so the
+migration changes nothing for anyone already trading — a stricter default would start rejecting
+quotes that worked yesterday. Owners and managers are exempt because they can edit the catalogue
+price itself; enforcing a discount cap on someone who can raise the list price is theatre.
+**Breaks if changed:** Making the policy global forces every business onto one risk appetite.
+Defaulting to anything but `free` silently rejects legitimate quotes on the day of the upgrade,
+with no one having asked for the change.
+
 ## Part 4 — Configuration and safety
 
 ### Q13. Why does `settings.py` refuse to start without a secret key?

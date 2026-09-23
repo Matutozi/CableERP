@@ -1,6 +1,6 @@
 import io
 import tempfile
-from unittest.mock import patch
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
@@ -8,13 +8,24 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db.utils import IntegrityError
 from django.test import RequestFactory, override_settings
+from django.utils import timezone
 from PIL import Image
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.test import APIClient, APITestCase
 
 from catalogue.models import CableSize, CableType
 
-from .models import DEFAULT_STORE_CODE, ROLE_PRESETS, BusinessProfile, Feature, Membership, Role, Store
+from .models import (
+    DEFAULT_STORE_CODE,
+    OWNER_TEMPLATE_NAME,
+    BusinessProfile,
+    Feature,
+    Invitation,
+    Membership,
+    RoleTemplate,
+    Store,
+    provision_business,
+)
 from .serializers import MAX_LOGO_BYTES, MAX_LOGO_DIMENSION
 from .utils import CURRENT_BUSINESS_SESSION_KEY, get_business, get_membership, require
 
@@ -320,29 +331,43 @@ class SeedDataTests(APITestCase):
         self.assertEqual(size.default_price, 33000)
 
 
+def make_member(business, user, template_name, **kwargs):
+    """Create a membership from one of the business's templates.
+
+    Seeds the defaults first so a test that only cares about membership does not have to know
+    that templates exist.
+    """
+    RoleTemplate.seed_for(business)
+    template = business.role_templates.get(name=template_name)
+    return Membership.create_from_template(business, user, template, **kwargs)
+
+
 class MembershipTests(APITestCase):
     """The spine: one person's access to one business (SYSTEM_DESIGN.md Q19, Q20)."""
 
     def setUp(self):
         self.user = User.objects.create_user("ada", password=PASSWORD)
         self.business = BusinessProfile.objects.create(user=self.user, business_name="Ada Cables")
+        RoleTemplate.seed_for(self.business)
 
-    def test_a_role_preset_is_copied_not_referenced(self):
-        """The property Q19 exists for: widening a preset must not widen existing members.
+    def test_a_template_is_copied_not_referenced(self):
+        """The property Q19 exists for: widening a template must not widen existing members.
 
-        This is the whole reason permissions are stored. If access were resolved from the role
-        name at request time, every manager on the platform would silently gain whatever a future
-        release adds to the preset.
+        This is the whole reason permissions are stored. If access were resolved from the template
+        at request time, editing "Manager" would silently re-grant every existing manager.
         """
-        member = Membership.create_with_role(self.business, self.user, Role.MANAGER)
+        member = make_member(self.business, self.user, "Manager")
         self.assertNotIn(Feature.BANK_DETAILS, member.permissions)
 
-        with patch.dict(ROLE_PRESETS, {Role.MANAGER: frozenset(Feature.values)}):
-            member.refresh_from_db()
-            self.assertFalse(member.has(Feature.BANK_DETAILS))
+        template = self.business.role_templates.get(name="Manager")
+        template.permissions = sorted(Feature.values)
+        template.save()
+
+        member.refresh_from_db()
+        self.assertFalse(member.has(Feature.BANK_DETAILS))
 
     def test_the_manager_preset_withholds_bank_details_and_member_management(self):
-        member = Membership.create_with_role(self.business, self.user, Role.MANAGER)
+        member = make_member(self.business, self.user, "Manager")
         self.assertTrue(member.has(Feature.QUOTES))
         self.assertTrue(member.has(Feature.VIEW_COSTS))
         self.assertFalse(member.has(Feature.BANK_DETAILS))
@@ -350,14 +375,14 @@ class MembershipTests(APITestCase):
 
     def test_the_sales_preset_cannot_see_cost(self):
         """PRD P6-F5: cost and margin are hidden from sales everywhere."""
-        member = Membership.create_with_role(self.business, self.user, Role.SALES)
+        member = make_member(self.business, self.user, "Sales")
         self.assertTrue(member.has(Feature.QUOTES))
         self.assertFalse(member.has(Feature.VIEW_COSTS))
         self.assertFalse(member.has(Feature.PURCHASES))
 
     def test_suspension_withholds_access_without_erasing_it(self):
         """PRD P6-F4: suspend without deleting, so history keeps naming them."""
-        member = Membership.create_with_role(self.business, self.user, Role.OWNER)
+        member = make_member(self.business, self.user, "Owner")
         member.status = Membership.Status.SUSPENDED
         member.save()
 
@@ -367,25 +392,26 @@ class MembershipTests(APITestCase):
     def test_a_business_can_have_two_owners(self):
         """PRD P6-F2b — impossible under the one-to-one this replaces."""
         second = User.objects.create_user("bola", password=PASSWORD)
-        Membership.create_with_role(self.business, self.user, Role.OWNER)
-        Membership.create_with_role(self.business, second, Role.OWNER)
-        self.assertEqual(self.business.memberships.filter(role=Role.OWNER).count(), 2)
+        make_member(self.business, self.user, "Owner")
+        make_member(self.business, second, "Owner")
+        self.assertEqual(self.business.memberships.filter(is_owner=True).count(), 2)
 
     def test_one_person_cannot_hold_two_memberships_of_one_business(self):
-        Membership.create_with_role(self.business, self.user, Role.OWNER)
+        make_member(self.business, self.user, "Owner")
         with self.assertRaises(IntegrityError):
-            Membership.create_with_role(self.business, self.user, Role.SALES)
+            make_member(self.business, self.user, "Sales")
 
     def test_a_user_can_belong_to_several_businesses(self):
         """PRD P6-F9."""
         other_owner = User.objects.create_user("chidi", password=PASSWORD)
         other = BusinessProfile.objects.create(user=other_owner, business_name="Chidi Cables")
-        Membership.create_with_role(self.business, self.user, Role.OWNER)
-        Membership.create_with_role(other, self.user, Role.SALES)
+        RoleTemplate.seed_for(other)
+        make_member(self.business, self.user, "Owner")
+        make_member(other, self.user, "Sales")
         self.assertEqual(self.user.memberships.count(), 2)
 
     def test_set_permissions_discards_anything_that_is_not_a_feature(self):
-        member = Membership.create_with_role(self.business, self.user, Role.SALES)
+        member = make_member(self.business, self.user, "Sales")
         member.set_permissions([Feature.QUOTES, "not_a_feature", Feature.REPORTS])
         self.assertEqual(member.permissions, sorted([Feature.QUOTES, Feature.REPORTS]))
 
@@ -397,6 +423,7 @@ class TenantResolutionTests(APITestCase):
         self.factory = RequestFactory()
         self.user = User.objects.create_user("ada", password=PASSWORD)
         self.business = BusinessProfile.objects.create(user=self.user, business_name="Ada Cables")
+        RoleTemplate.seed_for(self.business)
 
     def _request(self, session=None):
         request = self.factory.get("/")
@@ -410,11 +437,11 @@ class TenantResolutionTests(APITestCase):
         self.assertEqual(get_business(self._request()), self.business)
 
     def test_a_membership_takes_precedence_over_the_legacy_link(self):
-        Membership.create_with_role(self.business, self.user, Role.OWNER)
+        make_member(self.business, self.user, "Owner")
         self.assertEqual(get_business(self._request()), self.business)
 
     def test_a_suspended_membership_does_not_resolve(self):
-        member = Membership.create_with_role(self.business, self.user, Role.OWNER)
+        member = make_member(self.business, self.user, "Owner")
         member.status = Membership.Status.SUSPENDED
         member.save()
         self.assertIsNone(get_membership(self._request()))
@@ -422,8 +449,9 @@ class TenantResolutionTests(APITestCase):
     def test_the_session_chooses_between_several_businesses(self):
         other_owner = User.objects.create_user("chidi", password=PASSWORD)
         other = BusinessProfile.objects.create(user=other_owner, business_name="Chidi Cables")
-        Membership.create_with_role(self.business, self.user, Role.OWNER)
-        Membership.create_with_role(other, self.user, Role.SALES)
+        RoleTemplate.seed_for(other)
+        make_member(self.business, self.user, "Owner")
+        make_member(other, self.user, "Sales")
 
         # Two memberships and no choice made: ambiguous, so neither is assumed.
         self.assertIsNone(get_membership(self._request()))
@@ -432,7 +460,7 @@ class TenantResolutionTests(APITestCase):
         self.assertEqual(chosen.business, other)
 
     def test_a_stale_session_id_falls_through_instead_of_failing(self):
-        Membership.create_with_role(self.business, self.user, Role.OWNER)
+        make_member(self.business, self.user, "Owner")
         membership = get_membership(self._request({CURRENT_BUSINESS_SESSION_KEY: 9999}))
         self.assertEqual(membership.business, self.business)
 
@@ -440,7 +468,7 @@ class TenantResolutionTests(APITestCase):
         require(self._request(), Feature.BANK_DETAILS)
 
     def test_require_refuses_a_feature_the_member_does_not_hold(self):
-        Membership.create_with_role(self.business, self.user, Role.SALES)
+        make_member(self.business, self.user, "Sales")
         require(self._request(), Feature.QUOTES)
         with self.assertRaises(PermissionDenied):
             require(self._request(), Feature.BANK_DETAILS)
@@ -452,7 +480,7 @@ class StoreAllowanceTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user("ada", password=PASSWORD)
         self.business = BusinessProfile.objects.create(user=self.user, business_name="Ada Cables")
-        Membership.create_with_role(self.business, self.user, Role.OWNER)
+        make_member(self.business, self.user, "Owner")
         self.client.force_authenticate(self.user)
 
     def test_a_business_starts_with_an_allowance_of_one(self):
@@ -467,6 +495,7 @@ class StoreAllowanceTests(APITestCase):
     def test_two_businesses_may_share_a_store_code(self):
         other_owner = User.objects.create_user("bola", password=PASSWORD)
         other = BusinessProfile.objects.create(user=other_owner, business_name="Bola Cables")
+        RoleTemplate.seed_for(other)
         Store.objects.create(business=self.business, name="Ikeja", code="IKJ")
         Store.objects.create(business=other, name="Ikeja", code="IKJ")
         self.assertEqual(Store.objects.filter(code="IKJ").count(), 2)
@@ -527,7 +556,8 @@ class RegistrationBuildsTheSpineTests(APITestCase):
 
         business = BusinessProfile.objects.get(business_name="New Cables")
         membership = business.memberships.get()
-        self.assertEqual(membership.role, Role.OWNER)
+        self.assertEqual(membership.role_label, OWNER_TEMPLATE_NAME)
+        self.assertTrue(membership.is_owner)
         self.assertTrue(membership.has(Feature.BANK_DETAILS))
 
         store = business.stores.get()
@@ -548,3 +578,196 @@ class RegistrationBuildsTheSpineTests(APITestCase):
         request.user = user
         request.session = {}
         self.assertIsNotNone(get_membership(request))
+
+
+class RoleTemplateTests(APITestCase):
+    """Roles are the business's to define, not the platform's (SYSTEM_DESIGN.md Q26)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("ada", password=PASSWORD)
+        self.business = BusinessProfile.objects.create(user=self.user, business_name="Ada Cables")
+        RoleTemplate.seed_for(self.business)
+
+    def test_a_business_starts_with_three_templates(self):
+        self.assertEqual(
+            sorted(self.business.role_templates.values_list("name", flat=True)),
+            ["Manager", "Owner", "Sales"],
+        )
+        self.assertTrue(all(t.is_system for t in self.business.role_templates.all()))
+
+    def test_seeding_twice_does_not_duplicate(self):
+        RoleTemplate.seed_for(self.business)
+        self.assertEqual(self.business.role_templates.count(), 3)
+
+    def test_a_business_can_define_its_own_role(self):
+        """The whole point: an org chart with a cashier is not a platform concern."""
+        cashier = RoleTemplate.objects.create(business=self.business, name="Cashier")
+        cashier.set_permissions([Feature.CATALOGUE, Feature.QUOTES])
+        cashier.save()
+
+        member = User.objects.create_user("emeka", password=PASSWORD)
+        membership = Membership.create_from_template(self.business, member, cashier)
+        self.assertEqual(membership.role_label, "Cashier")
+        self.assertTrue(membership.has(Feature.QUOTES))
+        self.assertFalse(membership.has(Feature.VIEW_COSTS))
+        self.assertFalse(membership.is_owner)
+
+    def test_two_businesses_may_use_the_same_role_name_differently(self):
+        other_owner = User.objects.create_user("bola", password=PASSWORD)
+        other = BusinessProfile.objects.create(user=other_owner, business_name="Bola Cables")
+        RoleTemplate.seed_for(other)
+
+        mine = RoleTemplate.objects.create(business=self.business, name="Cashier", permissions=[Feature.QUOTES])
+        theirs = RoleTemplate.objects.create(
+            business=other, name="Cashier", permissions=[Feature.QUOTES, Feature.VIEW_COSTS]
+        )
+        self.assertNotEqual(mine.permissions, theirs.permissions)
+
+    def test_a_template_name_is_unique_within_a_business(self):
+        with self.assertRaises(IntegrityError):
+            RoleTemplate.objects.create(business=self.business, name="Manager")
+
+    def test_the_owner_template_cannot_lose_member_management(self):
+        """Otherwise one bad edit locks a business out of administering itself."""
+        owner = self.business.role_templates.get(name=OWNER_TEMPLATE_NAME)
+        with self.assertRaises(ValueError):
+            owner.set_permissions([Feature.QUOTES])
+
+    def test_permissions_can_be_set_per_person_regardless_of_template(self):
+        """Templates are a starting point; the owner tunes individuals."""
+        member = User.objects.create_user("emeka", password=PASSWORD)
+        membership = make_member(self.business, member, "Sales")
+        membership.set_permissions([*membership.permissions, Feature.VIEW_COSTS])
+        membership.save()
+
+        self.assertTrue(membership.has(Feature.VIEW_COSTS))
+        self.assertNotIn(Feature.VIEW_COSTS, self.business.role_templates.get(name="Sales").permissions)
+
+    def test_sales_can_read_the_catalogue_but_not_reprice_it(self):
+        """The CATALOGUE split: you cannot quote without reading it (PRD P6-F6)."""
+        sales = self.business.role_templates.get(name="Sales")
+        self.assertIn(Feature.CATALOGUE, sales.permissions)
+        self.assertNotIn(Feature.CATALOGUE_EDIT, sales.permissions)
+
+
+class StoreScopeTests(APITestCase):
+    """Staff see their own branches and no others (SYSTEM_DESIGN.md Q23)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("ada", password=PASSWORD)
+        self.business = BusinessProfile.objects.create(user=self.user, business_name="Ada Cables")
+        self.business.store_limit = 4
+        self.business.save()
+        RoleTemplate.seed_for(self.business)
+        self.ikeja = Store.objects.create(business=self.business, name="Ikeja", code="IKJ")
+        self.surulere = Store.objects.create(business=self.business, name="Surulere", code="SUR")
+        self.aba = Store.objects.create(business=self.business, name="Aba", code="ABA")
+
+    def test_an_owner_sees_every_store(self):
+        membership = make_member(self.business, self.user, OWNER_TEMPLATE_NAME)
+        self.assertTrue(membership.all_stores)
+        self.assertEqual(membership.visible_stores().count(), 3)
+
+    def test_an_owner_sees_a_branch_opened_after_they_joined(self):
+        """Why all_stores is a flag and not an empty set."""
+        membership = make_member(self.business, self.user, OWNER_TEMPLATE_NAME)
+        Store.objects.create(business=self.business, name="Kano", code="KAN")
+        self.assertEqual(membership.visible_stores().count(), 4)
+
+    def test_a_manager_sees_only_the_branches_they_were_given(self):
+        bola = User.objects.create_user("bola", password=PASSWORD)
+        membership = make_member(self.business, bola, "Manager", stores=[self.ikeja, self.surulere])
+
+        self.assertFalse(membership.all_stores)
+        self.assertEqual(sorted(s.code for s in membership.visible_stores()), ["IKJ", "SUR"])
+        self.assertTrue(membership.can_see_store(self.ikeja))
+        self.assertFalse(membership.can_see_store(self.aba))
+
+    def test_a_new_branch_is_not_visible_to_a_scoped_member(self):
+        """The other half of why the flag exists."""
+        bola = User.objects.create_user("bola", password=PASSWORD)
+        membership = make_member(self.business, bola, "Manager", stores=[self.ikeja])
+        Store.objects.create(business=self.business, name="Kano", code="KAN")
+        self.assertEqual(membership.visible_stores().count(), 1)
+
+    def test_a_deactivated_store_drops_out_of_scope(self):
+        bola = User.objects.create_user("bola", password=PASSWORD)
+        membership = make_member(self.business, bola, "Sales", stores=[self.ikeja, self.surulere])
+        self.ikeja.is_active = False
+        self.ikeja.save()
+        self.assertEqual([s.code for s in membership.visible_stores()], ["SUR"])
+
+
+class InvitationTests(APITestCase):
+    """Onboarding staff: the access is chosen now, the person arrives later (Q25)."""
+
+    def setUp(self):
+        self.owner = User.objects.create_user("ada", password=PASSWORD)
+        self.business = BusinessProfile.objects.create(user=self.owner, business_name="Ada Cables")
+        self.business.store_limit = 3
+        self.business.save()
+        RoleTemplate.seed_for(self.business)
+        make_member(self.business, self.owner, OWNER_TEMPLATE_NAME)
+        self.ikeja = Store.objects.create(business=self.business, name="Ikeja", code="IKJ")
+        self.aba = Store.objects.create(business=self.business, name="Aba", code="ABA")
+        self.sales = self.business.role_templates.get(name="Sales")
+
+    def test_issuing_returns_a_raw_token_that_is_not_stored(self):
+        invitation, raw = Invitation.issue(self.business, self.sales, invited_by=self.owner, email="e@x.com")
+        self.assertTrue(raw)
+        self.assertNotEqual(invitation.token_hash, raw)
+        self.assertEqual(invitation.token_hash, Invitation.hash_token(raw))
+        self.assertNotIn(raw, str(Invitation.objects.values_list("token_hash", flat=True)))
+
+    def test_an_invitation_copies_the_template_and_can_be_tuned(self):
+        invitation, _ = Invitation.issue(
+            self.business, self.sales, permissions=[Feature.QUOTES, Feature.VIEW_COSTS], stores=[self.ikeja]
+        )
+        self.assertEqual(invitation.role_label, "Sales")
+        self.assertIn(Feature.VIEW_COSTS, invitation.permissions)
+        self.assertEqual([s.code for s in invitation.stores.all()], ["IKJ"])
+
+    def test_accepting_creates_the_membership_with_the_chosen_access(self):
+        _, raw = Invitation.issue(
+            self.business, self.sales, invited_by=self.owner, stores=[self.ikeja], email="e@x.com"
+        )
+        emeka = User.objects.create_user("emeka", password=PASSWORD)
+        membership = Invitation.claim(raw).accept(emeka)
+
+        self.assertEqual(membership.business, self.business)
+        self.assertEqual(membership.role_label, "Sales")
+        self.assertFalse(membership.all_stores)
+        self.assertEqual([s.code for s in membership.visible_stores()], ["IKJ"])
+        self.assertFalse(membership.can_see_store(self.aba))
+        self.assertTrue(membership.has(Feature.QUOTES))
+        self.assertFalse(membership.has(Feature.VIEW_COSTS))
+
+    def test_a_token_cannot_be_used_twice(self):
+        _, raw = Invitation.issue(self.business, self.sales, email="e@x.com")
+        Invitation.claim(raw).accept(User.objects.create_user("emeka", password=PASSWORD))
+        self.assertIsNone(Invitation.claim(raw))
+
+    def test_an_expired_token_is_refused(self):
+        invitation, raw = Invitation.issue(self.business, self.sales, validity_days=7, email="e@x.com")
+        invitation.expires_at = timezone.now() - timedelta(seconds=1)
+        invitation.save()
+        self.assertIsNone(Invitation.claim(raw))
+        self.assertEqual(invitation.status, "expired")
+
+    def test_an_unknown_token_is_indistinguishable_from_a_used_one(self):
+        """Both return None, so probing links teaches an attacker nothing."""
+        self.assertIsNone(Invitation.claim("not-a-real-token"))
+
+    def test_editing_the_template_after_inviting_does_not_change_the_invitation(self):
+        _, raw = Invitation.issue(self.business, self.sales, email="e@x.com")
+        self.sales.permissions = sorted(Feature.values)
+        self.sales.save()
+
+        membership = Invitation.claim(raw).accept(User.objects.create_user("emeka", password=PASSWORD))
+        self.assertFalse(membership.has(Feature.BANK_DETAILS))
+
+    def test_provisioning_a_business_is_idempotent(self):
+        membership, _store = provision_business(self.business, self.owner)
+        self.assertEqual(self.business.memberships.count(), 1)
+        self.assertEqual(self.business.role_templates.count(), 3)
+        self.assertTrue(membership.is_owner)
