@@ -110,12 +110,16 @@ class Membership(models.Model):
     # can reshape this at the same time. A flat list until then keeps the checks honest.
     permissions = models.JSONField(default=list, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
-    invited_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    invited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["business", "user"], name="one_membership_per_user_per_business")]
+        constraints = [
+            models.UniqueConstraint(fields=["business", "user"], name="one_membership_per_user_per_business")
+        ]
         ordering = ["business_id", "id"]
 
     def __str__(self):
