@@ -35,6 +35,11 @@ class Quote(models.Model):
         SENT = "sent", "Sent"
 
     business = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name="quotes")
+    # Which branch this belongs to. Nullable: records predating stores have no branch to claim
+    # them, and a null is visible business-wide rather than hidden (SYSTEM_DESIGN.md Q32).
+    store = models.ForeignKey(
+        "accounts.Store", on_delete=models.PROTECT, null=True, blank=True, related_name="%(class)ss"
+    )
     reference_number = models.CharField(max_length=32, editable=False)
     customer_name = models.CharField(max_length=200)
     date = models.DateField(default=timezone.localdate)

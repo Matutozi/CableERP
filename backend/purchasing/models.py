@@ -29,6 +29,11 @@ class Purchase(models.Model):
     """One delivery: what arrived, from whom, and what it cost to get it here."""
 
     business = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name="purchases")
+    # Which branch this belongs to. Nullable: records predating stores have no branch to claim
+    # them, and a null is visible business-wide rather than hidden (SYSTEM_DESIGN.md Q32).
+    store = models.ForeignKey(
+        "accounts.Store", on_delete=models.PROTECT, null=True, blank=True, related_name="%(class)ss"
+    )
     supplier_name = models.CharField(max_length=200, blank=True)
     date = models.DateField(default=timezone.localdate)
     # Transport, clearing, loading: spread across the items by value, because leaving it out

@@ -226,16 +226,19 @@ class QuoteSerializer(HidesRestrictedFields, serializers.ModelSerializer):
         business = BusinessProfile.objects.select_for_update().get(pk=self.context["business"].pk)
         validated_data.setdefault("vat_percentage", business.vat_rate)
         validated_data.setdefault("date", timezone.localdate())
+        # Defaults first, then whatever was posted, so an explicit payment override or factory
+        # toggle wins while everything unspecified falls back to the profile. Both are frozen onto
+        # the quote either way: a later profile edit must not rewrite a quote already sent (Q6).
+        defaults = {
+            "payment_bank_name": business.bank_name,
+            "payment_account_name": business.account_name or business.business_name,
+            "payment_account_number": business.account_number,
+            "show_factory_price": business.show_factory_price,
+        }
         quote = Quote.objects.create(
             business=business,
             reference_number=Quote.next_reference_number(business, validated_data["date"]),
-            # Freeze where the customer should pay, so a later profile edit cannot rewrite it.
-            payment_bank_name=business.bank_name,
-            payment_account_name=business.account_name or business.business_name,
-            payment_account_number=business.account_number,
-            # A new quote inherits the business's preference, then carries its own copy so a later
-            # change to the preference cannot alter a quote already sent.
-            **{"show_factory_price": business.show_factory_price, **validated_data},
+            **{**defaults, **validated_data},
         )
         self._save_line_items(quote, items)
         snapshot_costs(quote)

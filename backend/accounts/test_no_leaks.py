@@ -197,3 +197,117 @@ class NoConfidentialLeakTests(APITestCase):
         """A silent zero-route walk would make every test above pass for the wrong reason."""
         visited = [url for url, response in self._reachable_responses() if response.status_code == 200]
         self.assertGreaterEqual(len(visited), 4, f"only visited {visited}")
+
+
+class StoreScopeLeakTests(APITestCase):
+    """A member scoped to one branch must not see another branch's trade (SYSTEM_DESIGN.md Q32)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        owner = User.objects.create_user("ada", password=PASSWORD)
+        cls.business = BusinessProfile.objects.create(user=owner, business_name="Ada Cables", store_limit=3)
+        provision_business(cls.business, owner)
+        cls.owner = owner
+
+        from accounts.models import Store
+
+        cls.ikeja = Store.objects.create(business=cls.business, name="Ikeja", code="IKJ")
+        cls.aba = Store.objects.create(business=cls.business, name="Aba", code="ABA")
+
+        def make_quote(reference, store):
+            return Quote.objects.create(
+                business=cls.business,
+                store=store,
+                customer_name=f"Customer {reference}",
+                staff_name="Ada",
+                reference_number=reference,
+            )
+
+        cls.ikeja_quote = make_quote("QT-IKJ", cls.ikeja)
+        cls.aba_quote = make_quote("QT-ABA", cls.aba)
+        cls.shared_quote = make_quote("QT-OLD", None)
+
+        record(cls.business, owner, AuditLog.Action.QUOTE_CREATED, "Ikeja sale", store=cls.ikeja)
+        record(cls.business, owner, AuditLog.Action.QUOTE_CREATED, "Aba sale", store=cls.aba)
+        record(cls.business, owner, AuditLog.Action.PRICE_CHANGED, "Business-wide price change")
+
+        # Scoped to Ikeja only, but otherwise fully trusted — so anything they cannot see is the
+        # store scope doing the work, not a missing permission.
+        seller = User.objects.create_user("emeka", password=PASSWORD)
+        template = cls.business.role_templates.get(name="Owner")
+        cls.membership = Membership.create_from_template(cls.business, seller, template, all_stores=False)
+        cls.membership.stores.set([cls.ikeja])
+        cls.seller = seller
+
+    def setUp(self):
+        self.client.force_authenticate(self.seller)
+
+    def test_quotes_from_another_branch_are_invisible(self):
+        references = {q["reference_number"] for q in self.client.get("/api/quotes/").data["results"]}
+        self.assertIn("QT-IKJ", references)
+        self.assertNotIn("QT-ABA", references)
+
+    def test_another_branch_s_quote_is_404_not_403(self):
+        """Same reasoning as tenant scoping (Q2): a 403 would confirm the record exists."""
+        self.assertEqual(self.client.get(f"/api/quotes/{self.aba_quote.id}/").status_code, 404)
+
+    def test_records_with_no_branch_stay_visible(self):
+        """Anything predating stores belongs to the business, not to a branch."""
+        references = {q["reference_number"] for q in self.client.get("/api/quotes/").data["results"]}
+        self.assertIn("QT-OLD", references)
+
+    def test_activity_is_scoped_to_the_branch(self):
+        summaries = {entry["summary"] for entry in self.client.get("/api/activity/").data}
+        self.assertIn("Ikeja sale", summaries)
+        self.assertNotIn("Aba sale", summaries)
+        self.assertIn("Business-wide price change", summaries, "unscoped history stays visible")
+
+    def test_a_member_with_every_branch_sees_everything(self):
+        self.membership.all_stores = True
+        self.membership.save()
+        references = {q["reference_number"] for q in self.client.get("/api/quotes/").data["results"]}
+        self.assertEqual(references, {"QT-IKJ", "QT-ABA", "QT-OLD"})
+
+    def test_adding_a_branch_to_a_membership_widens_what_they_see(self):
+        """The multi-store case: an owner grants Aba as well, and Aba appears."""
+        self.membership.stores.add(self.aba)
+        references = {q["reference_number"] for q in self.client.get("/api/quotes/").data["results"]}
+        self.assertEqual(references, {"QT-IKJ", "QT-ABA", "QT-OLD"})
+
+    def test_the_owner_sees_every_branch(self):
+        self.client.force_authenticate(self.owner)
+        references = {q["reference_number"] for q in self.client.get("/api/quotes/").data["results"]}
+        self.assertEqual(references, {"QT-IKJ", "QT-ABA", "QT-OLD"})
+
+    def test_a_new_quote_is_filed_under_the_member_s_branch(self):
+        response = self.client.post(
+            "/api/quotes/",
+            {
+                "customer_name": "Musa",
+                "staff_name": "Emeka",
+                "line_items": [
+                    {
+                        "cable_type_name": "Singles",
+                        "size_label": "1.5mm",
+                        "unit": "coil",
+                        "unit_price": "1000",
+                        "colours": [{"colour": "", "quantity": 2}],
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Quote.objects.get(pk=response.data["id"]).store, self.ikeja)
+
+    def test_no_route_returns_another_branch_s_reference(self):
+        """The enumerating check, applied to store scope rather than to cost."""
+        offenders = []
+        for route in api_routes():
+            url = "/" + route.replace("^", "").replace("$", "")
+            if "?P<" in url or "auth/" in url or "logo" in url:
+                continue
+            response = self.client.get(url)
+            if response.status_code == 200 and "QT-ABA" in response.content.decode():
+                offenders.append(url)
+        self.assertEqual(offenders, [], f"another branch's quote appeared at: {offenders}")

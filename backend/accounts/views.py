@@ -22,7 +22,7 @@ from .serializers import (
     image_upload_serializer,
 )
 from .throttling import LoginUsernameThrottle
-from .utils import get_business
+from .utils import get_business, scope_to_stores
 
 
 class MeView(APIView):
@@ -110,7 +110,8 @@ class ActivityView(generics.ListAPIView):
         # blocked: quote and price history is exactly what a manager should be able to review.
         if not member_can(self.request, Feature.BANK_DETAILS):
             entries = entries.exclude(action=AuditLog.Action.BANK_CHANGED)
-        return entries[:50]
+        # A branch's staff see their branch's history and no other's.
+        return scope_to_stores(entries, self.request).order_by("-created_at", "-id")[:50]
 
 
 class ProfileLogoView(APIView):

@@ -436,6 +436,9 @@ class AuditLog(models.Model):
         WAYBILL_DELETED = "waybill_deleted", "Waybill deleted"
 
     business = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name="audit_log")
+    # The history is a second route to the same information, so it is scoped like the documents it
+    # describes. Null means business-wide — a bank change is not a branch's doing (Q32).
+    store = models.ForeignKey(Store, on_delete=models.SET_NULL, null=True, blank=True, related_name="audit_log")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+")
     # 32 rather than 20: action names are descriptive, and the PRD already plans to widen this.
     action = models.CharField(max_length=32, choices=Action.choices)
@@ -450,12 +453,17 @@ class AuditLog(models.Model):
         return f"{self.get_action_display()}: {self.summary}"
 
 
-def record(business, user, action, summary, reference=""):
-    """Add one line of history. Called from the views that change money, bank details or quotes."""
+def record(business, user, action, summary, reference="", store=None):
+    """Add one line of history. Called from the views that change money, bank details or quotes.
+
+    `store` scopes the entry to a branch. Left None for things the business does as a whole — a
+    bank change, a price change — which every member may see (SYSTEM_DESIGN.md Q32).
+    """
     return AuditLog.objects.create(
         business=business,
         user=user if getattr(user, "is_authenticated", False) else None,
         action=action,
         summary=summary[:255],
         reference=reference[:100],
+        store=store,
     )

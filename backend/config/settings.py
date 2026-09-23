@@ -114,11 +114,15 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     # Throttles use Django's cache. The default local-memory cache counts per process,
     # so give the deployment a shared cache (Redis) once it runs more than one worker.
+    # Rates are configuration, not policy: an operator may need to loosen them for a load test or
+    # tighten them under attack, and the browser suite signs in far more often than a person would.
+    # The defaults are the production values; nothing has to be set for them to apply.
     "DEFAULT_THROTTLE_RATES": {
-        "auth": "10/min",  # sign-in attempts, per IP
-        "login_username": "5/min",  # sign-in attempts against one account, from any address
-        "register": "20/hour",  # new accounts, per IP
-        "pdf": "60/hour",  # PDF renders, per user
+        "auth": os.environ.get("DJANGO_THROTTLE_AUTH", "10/min"),  # sign-in attempts, per IP
+        # sign-in attempts against one account, from any address
+        "login_username": os.environ.get("DJANGO_THROTTLE_LOGIN_USERNAME", "5/min"),
+        "register": os.environ.get("DJANGO_THROTTLE_REGISTER", "20/hour"),  # new accounts, per IP
+        "pdf": os.environ.get("DJANGO_THROTTLE_PDF", "60/hour"),  # PDF renders, per user
     },
 }
 

@@ -7,7 +7,7 @@ from rest_framework.response import Response
 
 from accounts.models import AuditLog, Feature, record
 from accounts.permissions import requires
-from accounts.utils import get_business
+from accounts.utils import default_store, get_business, scope_to_stores
 from quotes.views import PdfRateThrottle
 
 from .models import Waybill
@@ -28,9 +28,10 @@ class WaybillViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = (
             Waybill.objects.filter(business=get_business(self.request))
-            .select_related("business", "quote")
+            .select_related("business", "quote", "store")
             .prefetch_related("items__colours")
         )
+        queryset = scope_to_stores(queryset, self.request)
         quote = self.request.query_params.get("quote")
         if quote and quote.isdigit():
             queryset = queryset.filter(quote_id=int(quote))
@@ -56,7 +57,11 @@ class WaybillViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        waybill = Waybill.from_quote(serializer.validated_data["quote"], request.user)
+        quote = serializer.validated_data["quote"]
+        waybill = Waybill.from_quote(quote, request.user)
+        # A delivery note belongs to the branch that sold the goods, not to whoever printed it.
+        waybill.store = quote.store or default_store(request)
+        waybill.save(update_fields=["store"])
         waybill = self.get_queryset().get(pk=waybill.pk)
         self._record(waybill, AuditLog.Action.WAYBILL_CREATED)
         return Response(

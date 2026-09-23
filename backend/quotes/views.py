@@ -11,7 +11,7 @@ from rest_framework.throttling import UserRateThrottle
 
 from accounts.models import AuditLog, BusinessProfile, Feature, naira, record
 from accounts.permissions import requires
-from accounts.utils import get_business
+from accounts.utils import default_store, get_business, scope_to_stores
 
 from .models import Quote
 from .pdf import quote_pdf_bytes
@@ -37,9 +37,10 @@ class QuoteViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = (
             Quote.objects.filter(business=get_business(self.request))
-            .select_related("business")
+            .select_related("business", "store")
             .prefetch_related("line_items__colours")
         )
+        queryset = scope_to_stores(queryset, self.request)
         search = self.request.query_params.get("search", "").strip()
         if search:
             queryset = queryset.filter(Q(customer_name__icontains=search) | Q(reference_number__icontains=search))
@@ -61,7 +62,9 @@ class QuoteViewSet(viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
-        self._record(serializer.save(), AuditLog.Action.QUOTE_CREATED)
+        # Filed under the branch the member works in, so their colleagues at other branches do not
+        # see it (SYSTEM_DESIGN.md Q32).
+        self._record(serializer.save(store=default_store(self.request)), AuditLog.Action.QUOTE_CREATED)
 
     def perform_update(self, serializer):
         was_draft = serializer.instance.status == Quote.Status.DRAFT

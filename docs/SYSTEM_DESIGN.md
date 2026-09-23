@@ -390,6 +390,28 @@ poor way to steal.
 **Breaks if changed:** Making the fields writable without the permission check hands every
 salesperson a way to redirect customer payments, with the quote PDF making it look official.
 
+### Q32. How is store scoping applied, and why does every document carry a store?
+**Where:** `store` on `Quote`, `Waybill`, `Purchase` and `AuditLog`; `accounts/utils.py:scope_to_stores`
+**Decision:** Each document and each audit entry belongs to a store. Every queryset filters through
+one helper that reads `Membership.visible_stores()`, the way tenancy already funnels through
+`get_business()`. Records whose store is null are visible to everyone in the business.
+**Reasoning:** Staff must not see another branch's trade, and the membership already records who may
+see what (Q23) — there was simply nothing to filter against. Putting the FK on the documents rather
+than inferring the branch from the author means a record stays with its branch even after the person
+who wrote it leaves or moves.
+`AuditLog` carries it for the same reason the documents do: the history is a second route to the
+same information, and a scoping rule applied to quotes but not to the log of quote activity is not
+a scoping rule.
+**Null means business-wide, not hidden.** Profile and bank changes are not a branch's doing, and
+records predating this migration have no branch to claim them. Hiding nulls would blank the history
+of every existing business on upgrade; showing them keeps the log honest and errs toward the
+behaviour people already have.
+**Reference numbers deliberately do not carry a store code** (PRD P6-F25 deferred). The numbering is
+unique per business per day, and adding a branch segment would change that rule for every existing
+quote. Scoping works without it.
+**Breaks if changed:** Filtering per view instead of through the helper means the next viewset
+forgets, and forgetting is invisible — the data simply looks complete to whoever is looking.
+
 ## Part 4 — Configuration and safety
 
 ### Q13. Why does `settings.py` refuse to start without a secret key?
