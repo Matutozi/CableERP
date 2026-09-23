@@ -10,7 +10,9 @@
     "e2e": "node e2e/smoke.mjs",
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "e2e:spine": "node e2e/spine.mjs",
+    "e2e:all": "node e2e/smoke.mjs && node e2e/spine.mjs"
   },
   "dependencies": {
     "react": "^19.1.0",

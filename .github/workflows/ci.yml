@@ -109,5 +109,5 @@ jobs:
           npx vite --port 5173 --strictPort &
           timeout 60 bash -c 'until curl -sf http://localhost:5173/api/auth/me/ >/dev/null; do sleep 1; done'
         working-directory: frontend
-      - run: npm run e2e
+      - run: npm run e2e:all
         working-directory: frontend

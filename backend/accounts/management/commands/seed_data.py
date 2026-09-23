@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from accounts.models import BusinessProfile
+from accounts.models import DEFAULT_STORE_CODE, DEFAULT_STORE_NAME, BusinessProfile, Membership, Role, Store
 from catalogue.models import CableSize, CableType, record_price
 
 PROFILE = {
@@ -99,6 +99,12 @@ class Command(BaseCommand):
             self.stdout.write(f"User {username!r} already exists; password left unchanged.")
 
         profile, _ = BusinessProfile.objects.get_or_create(user=user, defaults=PROFILE)
+        # Seeded data must build the same spine registration does, or a seeded stack exercises the
+        # legacy fallback in get_business() rather than the path real businesses take — which is
+        # exactly the difference that makes a smoke test pass while production is broken.
+        if not profile.memberships.filter(user=user).exists():
+            Membership.create_with_role(profile, user, Role.OWNER)
+        Store.objects.get_or_create(business=profile, code=DEFAULT_STORE_CODE, defaults={"name": DEFAULT_STORE_NAME})
 
         for type_order, (name, unit, colours, sizes) in enumerate(CATALOGUE):
             cable_type, _ = CableType.objects.get_or_create(

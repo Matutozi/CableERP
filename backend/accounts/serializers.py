@@ -8,7 +8,16 @@ from django.db import transaction
 from PIL import Image
 from rest_framework import serializers
 
-from .models import AuditLog, BusinessProfile, record
+from .models import (
+    DEFAULT_STORE_CODE,
+    DEFAULT_STORE_NAME,
+    AuditLog,
+    BusinessProfile,
+    Membership,
+    Role,
+    Store,
+    record,
+)
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -70,7 +79,13 @@ class RegisterSerializer(serializers.Serializer):
             first_name=first_name,
             last_name=last_name.strip(),
         )
-        BusinessProfile.objects.create(user=user, business_name=validated_data["business_name"].strip())
+        business = BusinessProfile.objects.create(user=user, business_name=validated_data["business_name"].strip())
+        # Onboarding creates the whole spine, not just the profile. Without the membership a new
+        # business falls through to the legacy one-to-one in get_business(), which is a fallback
+        # for businesses that predate Membership — not a path anything new should take. Without
+        # the store there is nothing for quotes and purchases to belong to (PRD P6-F21).
+        Membership.create_with_role(business, user, Role.OWNER)
+        Store.objects.create(business=business, name=DEFAULT_STORE_NAME, code=DEFAULT_STORE_CODE)
         return user
 
 
@@ -113,10 +128,15 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
             "payment_terms",
             "quote_validity",
             "vat_rate",
+            # Visible so the app can show "2 of 3 stores used", but never writable here: the
+            # allowance is the operator's lever, not the customer's (SYSTEM_DESIGN.md Q21).
+            "store_limit",
+            "active_store_count",
+            "is_over_store_limit",
             "current_password",
             "updated_at",
         ]
-        read_only_fields = ["updated_at"]
+        read_only_fields = ["updated_at", "store_limit", "active_store_count", "is_over_store_limit"]
 
     def get_logo(self, profile):
         return profile.logo.url if profile.logo else None

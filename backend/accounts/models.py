@@ -6,6 +6,11 @@ from django.db import models
 
 DEFAULT_DISCLAIMER = "Prices are subject to variations in market conditions"
 
+# The store every business starts with. Migration 0009 keeps its own copy of these, as a data
+# migration must reproduce the state at the time it ran rather than follow later edits.
+DEFAULT_STORE_NAME = "Main"
+DEFAULT_STORE_CODE = "MAIN"
+
 
 def naira(value):
     return f"₦{value:,.2f}"
@@ -40,6 +45,14 @@ class BusinessProfile(models.Model):
         validators=[MinValueValidator(0), MaxValueValidator(100)],
         help_text="Percentage. Set to 0 if VAT does not apply.",
     )
+    # How many active stores this business may run. Set by a platform operator in the Django
+    # admin, never through the API — see SYSTEM_DESIGN.md Q21. When plans arrive this becomes the
+    # per-customer override of the plan's default rather than the only source.
+    store_limit = models.PositiveSmallIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="Maximum active stores. Operator-set; the business cannot change it.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -49,6 +62,46 @@ class BusinessProfile(models.Model):
     @property
     def phone_list(self):
         return [phone.strip() for phone in self.phone_numbers.split(",") if phone.strip()]
+
+    @property
+    def active_store_count(self):
+        return self.stores.filter(is_active=True).count()
+
+    @property
+    def is_over_store_limit(self):
+        """Over the allowance, and therefore restricted until the owner deactivates stores (Q22)."""
+        return self.active_store_count > self.store_limit
+
+
+class Store(models.Model):
+    """A branch a business trades from. The third level of tenancy: user → business → store.
+
+    Every business has at least one (PRD P6-F21). Quotes, waybills, purchases and per-store cost
+    hang off this rather than off the business directly, so the branches of a business that buy
+    independently can carry different landed costs.
+    """
+
+    business = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name="stores")
+    name = models.CharField(max_length=120)
+    # Goes into reference numbers — QT-IKJ-20260923-001 (PRD P6-F25) — so it is short, uppercase
+    # and fixed once documents carry it.
+    code = models.CharField(max_length=8, help_text="Short branch code used in reference numbers, e.g. IKJ.")
+    address = models.TextField(blank=True)
+    # Deactivated rather than deleted: a closed branch's quotes and waybills must keep resolving.
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["business", "code"], name="one_store_code_per_business")]
+        ordering = ["business_id", "name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+    def save(self, *args, **kwargs):
+        self.code = self.code.strip().upper()
+        return super().save(*args, **kwargs)
 
 
 class Feature(models.TextChoices):

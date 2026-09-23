@@ -197,6 +197,40 @@ the schema, which is why prices are absent rather than merely hidden in the temp
 
 ---
 
+### Q21. Why can a business not change its own store allowance?
+**Where:** `accounts/models.py:BusinessProfile.store_limit` *(being built)*
+**Decision:** `store_limit` is set by a platform operator through the Django admin. It is readable
+through the API and writable nowhere in it, for any role — owner included.
+**Reasoning:** A limit the limited party can raise is not a limit, it is a preference with extra
+steps. The allowance is the shape a commercial lever takes (PRD P6-F18, plan tiers enforcing
+limits), so it has to sit outside the customer's reach or it can never be priced. Setting it
+per-business rather than deriving it from a plan is deliberate for now: `Subscription` does not
+exist, and a plain integer on the profile is the smallest thing that is still enforceable. When
+plans arrive, the plan supplies the default and this field becomes the per-customer override,
+which is a widening rather than a rewrite.
+**Breaks if changed:** Exposing it on `BusinessProfileSerializer` as writable lets any owner grant
+themselves unlimited stores, and every downstream billing decision built on the allowance becomes
+unenforceable — silently, because nothing errors.
+
+### Q22. What happens when a business ends up over its store allowance?
+**Where:** `accounts/models.py:BusinessProfile.is_over_store_limit`, enforced in the write path
+**Decision:** Lowering the allowance below the number of active stores is **permitted**, and puts
+the business into a restricted state: reads and PDFs continue, ordinary writes are refused, and the
+only write still accepted is deactivating a store. It clears itself the moment active stores are
+back within the allowance.
+**Reasoning:** The operator has to be able to lower an allowance without first negotiating which
+branch a customer gives up — a downgrade that the customer can block is not a downgrade. But the
+system must not choose the branch either: deactivating the wrong store would strand quotes,
+waybills and per-store costs belonging to a live part of the business. Restricting until the owner
+picks puts the decision with the only party who knows which branch matters, while making it
+impossible to ignore. Rejecting the change outright was considered and rejected for the first
+reason; a soft cap that only blocks new stores was rejected because it lets a business sit over
+quota indefinitely, which makes the allowance unenforceable in exactly the way Q21 guards against.
+These are the same semantics as a lapsed subscription (D5), deliberately — one restricted state,
+not two.
+**Breaks if changed:** Auto-deactivating the newest or lowest-numbered store to fit silently
+detaches a branch's documents and cost history, with no record of who decided it or why.
+
 ## Part 4 — Configuration and safety
 
 ### Q13. Why does `settings.py` refuse to start without a secret key?

@@ -14,7 +14,7 @@ from rest_framework.test import APIClient, APITestCase
 
 from catalogue.models import CableSize, CableType
 
-from .models import ROLE_PRESETS, BusinessProfile, Feature, Membership, Role
+from .models import DEFAULT_STORE_CODE, ROLE_PRESETS, BusinessProfile, Feature, Membership, Role, Store
 from .serializers import MAX_LOGO_BYTES, MAX_LOGO_DIMENSION
 from .utils import CURRENT_BUSINESS_SESSION_KEY, get_business, get_membership, require
 
@@ -444,3 +444,107 @@ class TenantResolutionTests(APITestCase):
         require(self._request(), Feature.QUOTES)
         with self.assertRaises(PermissionDenied):
             require(self._request(), Feature.BANK_DETAILS)
+
+
+class StoreAllowanceTests(APITestCase):
+    """The operator's lever, and what happens when a business exceeds it (Q21, Q22)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("ada", password=PASSWORD)
+        self.business = BusinessProfile.objects.create(user=self.user, business_name="Ada Cables")
+        Membership.create_with_role(self.business, self.user, Role.OWNER)
+        self.client.force_authenticate(self.user)
+
+    def test_a_business_starts_with_an_allowance_of_one(self):
+        self.assertEqual(self.business.store_limit, 1)
+
+    def test_a_store_code_is_upper_cased_and_unique_per_business(self):
+        Store.objects.create(business=self.business, name="Ikeja", code=" ikj ")
+        self.assertEqual(self.business.stores.get(name="Ikeja").code, "IKJ")
+        with self.assertRaises(IntegrityError):
+            Store.objects.create(business=self.business, name="Other", code="ikj")
+
+    def test_two_businesses_may_share_a_store_code(self):
+        other_owner = User.objects.create_user("bola", password=PASSWORD)
+        other = BusinessProfile.objects.create(user=other_owner, business_name="Bola Cables")
+        Store.objects.create(business=self.business, name="Ikeja", code="IKJ")
+        Store.objects.create(business=other, name="Ikeja", code="IKJ")
+        self.assertEqual(Store.objects.filter(code="IKJ").count(), 2)
+
+    def test_only_active_stores_count_towards_the_allowance(self):
+        Store.objects.create(business=self.business, name="Ikeja", code="IKJ")
+        Store.objects.create(business=self.business, name="Closed", code="OLD", is_active=False)
+        self.assertEqual(self.business.active_store_count, 1)
+        self.assertFalse(self.business.is_over_store_limit)
+
+    def test_lowering_the_allowance_below_use_puts_the_business_over_limit(self):
+        """Q22: the decrease is allowed; the business is restricted until the owner chooses."""
+        Store.objects.create(business=self.business, name="Ikeja", code="IKJ")
+        Store.objects.create(business=self.business, name="Surulere", code="SUR")
+        self.business.store_limit = 2
+        self.business.save()
+        self.assertFalse(self.business.is_over_store_limit)
+
+        self.business.store_limit = 1
+        self.business.save()
+        self.assertTrue(self.business.is_over_store_limit)
+
+    def test_deactivating_a_store_clears_the_over_limit_state(self):
+        """The remedy must actually work, or the business is stuck restricted forever."""
+        Store.objects.create(business=self.business, name="Ikeja", code="IKJ")
+        surulere = Store.objects.create(business=self.business, name="Surulere", code="SUR")
+        self.assertTrue(self.business.is_over_store_limit)
+
+        surulere.is_active = False
+        surulere.save()
+        self.assertFalse(self.business.is_over_store_limit)
+
+    def test_the_api_reports_the_allowance_but_refuses_to_change_it(self):
+        """Q21: a limit the limited party can raise is not a limit."""
+        response = self.client.get("/api/profile/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["store_limit"], 1)
+        self.assertEqual(response.data["active_store_count"], 0)
+        self.assertIs(response.data["is_over_store_limit"], False)
+
+        response = self.client.patch("/api/profile/", {"store_limit": 99}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.business.refresh_from_db()
+        self.assertEqual(self.business.store_limit, 1)
+
+
+class RegistrationBuildsTheSpineTests(APITestCase):
+    """Onboarding must create the membership and first store, not just the profile."""
+
+    def test_registering_creates_an_owner_membership_and_a_first_store(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            {"business_name": "New Cables", "username": "newbie", "password": "a-strong-pass-123"},
+            format="json",
+            REMOTE_ADDR="198.51.100.7",
+        )
+        self.assertEqual(response.status_code, 201)
+
+        business = BusinessProfile.objects.get(business_name="New Cables")
+        membership = business.memberships.get()
+        self.assertEqual(membership.role, Role.OWNER)
+        self.assertTrue(membership.has(Feature.BANK_DETAILS))
+
+        store = business.stores.get()
+        self.assertEqual(store.code, DEFAULT_STORE_CODE)
+        self.assertTrue(store.is_active)
+        self.assertFalse(business.is_over_store_limit)
+
+    def test_a_new_business_does_not_fall_back_to_the_legacy_path(self):
+        """The gap this closes: without a membership row, get_business() uses the one-to-one."""
+        self.client.post(
+            "/api/auth/register/",
+            {"business_name": "New Cables", "username": "newbie", "password": "a-strong-pass-123"},
+            format="json",
+            REMOTE_ADDR="198.51.100.8",
+        )
+        user = User.objects.get(username="newbie")
+        request = RequestFactory().get("/")
+        request.user = user
+        request.session = {}
+        self.assertIsNotNone(get_membership(request))
