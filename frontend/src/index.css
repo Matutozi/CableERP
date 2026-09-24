@@ -114,7 +114,9 @@ textarea { resize: vertical; line-height: 1.5; }
 
 .bottom-nav {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  /* Auto columns, not a hard-coded count: a fifth nav item used to wrap onto a second row,
+     doubling the bar's height so it covered the page content behind it. */
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
   padding-bottom: env(safe-area-inset-bottom);
   background: var(--surface); border-top: 1px solid var(--border);
 }
@@ -580,3 +582,40 @@ textarea { resize: vertical; line-height: 1.5; }
 .inline-price-factory .inline-input { color: var(--muted); }
 .quote-factory { color: var(--muted); text-decoration: line-through; }
 .quote-saving { color: #047857; font-weight: 600; }
+
+/* Waybill preview: the driver's copy, so signatures matter and prices never appear. */
+.doc-signatures { display: flex; gap: 24px; margin-top: 32px; flex-wrap: wrap; }
+.doc-signatures > div { flex: 1 1 160px; }
+.doc-sign-line { border-bottom: 1px solid var(--border); height: 28px; margin-bottom: 6px; }
+.doc-notes { margin-top: 16px; color: var(--muted); white-space: pre-wrap; }
+.waybill-row-group { display: flex; align-items: stretch; border-bottom: 1px solid var(--border); }
+.waybill-row-group:last-child { border-bottom: 0; }
+.waybill-row-group .waybill-row { flex: 1; border-bottom: 0; }
+.row-preview { align-self: center; margin-right: 8px; white-space: nowrap; }
+
+/* Staff: who works here and what each may do. */
+.permission-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.permission-option { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; }
+.permission-option input { margin-top: 3px; }
+.permission-option span { display: flex; flex-direction: column; }
+.permission-option small { color: var(--muted); }
+.access-block { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin: 14px 0; }
+.access-block legend { padding: 0 6px; font-weight: 600; font-size: 0.9rem; }
+.invite-form, .invite-link { padding: 16px; margin-bottom: 16px; }
+.invite-url { width: 100%; font-family: var(--mono, monospace); font-size: 0.85rem; padding: 10px; margin: 10px 0; }
+.form-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-top: 12px; }
+.member { border-bottom: 1px solid var(--border); }
+.member:last-child { border-bottom: 0; }
+.member-head { display: flex; width: 100%; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 14px 16px; background: none; border: 0; text-align: left; cursor: pointer; }
+.member-main { display: flex; flex-direction: column; gap: 2px; }
+.member-name { font-weight: 600; display: flex; gap: 8px; align-items: center; }
+.member-sub { color: var(--muted); font-size: 0.85rem; }
+.member-body { padding: 0 16px 16px; }
+.tag { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 6px;
+  border-radius: 4px; background: var(--accent-soft, #e0e7ff); color: var(--accent, #3730a3); }
+.tag-muted { background: var(--border); color: var(--muted); }
+.panel-title { font-size: 0.95rem; margin: 0 0 8px; }
+.store-picker select { font-size: 13px; padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface); max-width: 140px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
