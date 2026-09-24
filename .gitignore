@@ -20,3 +20,7 @@ frontend/dist/
 .env
 !backend/.env.example
 backend/*.sqlite3.*
+
+# Coverage
+.coverage
+htmlcov/

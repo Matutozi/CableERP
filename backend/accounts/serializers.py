@@ -8,7 +8,19 @@ from django.db import transaction
 from PIL import Image
 from rest_framework import serializers
 
-from .models import AuditLog, BusinessProfile, record
+from .models import (
+    OWNER_TEMPLATE_NAME,
+    AuditLog,
+    BusinessProfile,
+    Feature,
+    Invitation,
+    Membership,
+    RoleTemplate,
+    Store,
+    provision_business,
+    record,
+)
+from .permissions import HidesRestrictedFields
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -70,7 +82,11 @@ class RegisterSerializer(serializers.Serializer):
             first_name=first_name,
             last_name=last_name.strip(),
         )
-        BusinessProfile.objects.create(user=user, business_name=validated_data["business_name"].strip())
+        business = BusinessProfile.objects.create(user=user, business_name=validated_data["business_name"].strip())
+        # Role templates, an owner membership and the first store. Without them a new business
+        # falls through to the legacy one-to-one in get_business() and has nothing to invite
+        # anyone with.
+        provision_business(business, user)
         return user
 
 
@@ -87,7 +103,10 @@ class LoginSerializer(serializers.Serializer):
         return attrs
 
 
-class BusinessProfileSerializer(serializers.ModelSerializer):
+class BusinessProfileSerializer(HidesRestrictedFields, serializers.ModelSerializer):
+    # Where customers send money. Dropping the fields also blocks writing them, which is what
+    # PRD P6-F7 asks for: only the owner changes bank details.
+    restricted_fields = {Feature.BANK_DETAILS: list(BANK_FIELDS)}
     # A path, never an absolute URL: the app and the API share an origin, and an absolute one built from
     # Django's own socket (http://127.0.0.1:8000/...) points a phone at itself.
     logo = serializers.SerializerMethodField()
@@ -113,10 +132,17 @@ class BusinessProfileSerializer(serializers.ModelSerializer):
             "payment_terms",
             "quote_validity",
             "vat_rate",
+            # Writable: this one is the business's own preference, unlike the allowance below.
+            "show_factory_price",
+            # Visible so the app can show "2 of 3 stores used", but never writable here: the
+            # allowance is the operator's lever, not the customer's (SYSTEM_DESIGN.md Q21).
+            "store_limit",
+            "active_store_count",
+            "is_over_store_limit",
             "current_password",
             "updated_at",
         ]
-        read_only_fields = ["updated_at"]
+        read_only_fields = ["updated_at", "store_limit", "active_store_count", "is_over_store_limit"]
 
     def get_logo(self, profile):
         return profile.logo.url if profile.logo else None
@@ -200,3 +226,181 @@ def image_upload_serializer(field):
 
 
 LogoSerializer = image_upload_serializer("logo")
+
+
+class StoreSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Store
+        fields = ["id", "name", "code", "address", "is_active"]
+
+
+class RoleTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RoleTemplate
+        fields = ["id", "name", "permissions", "is_system"]
+        read_only_fields = ["is_system"]
+
+    def validate_permissions(self, value):
+        unknown = sorted(set(value) - set(Feature.values))
+        if unknown:
+            raise serializers.ValidationError(f"Not a feature: {', '.join(unknown)}.")
+        return sorted(set(value))
+
+    def validate(self, attrs):
+        """Guard the one edit a business cannot undo from inside the product."""
+        name = attrs.get("name", getattr(self.instance, "name", ""))
+        permissions = attrs.get("permissions", getattr(self.instance, "permissions", []))
+        if name == OWNER_TEMPLATE_NAME and Feature.MANAGE_MEMBERS not in permissions:
+            raise serializers.ValidationError(
+                {"permissions": "The Owner role must keep the ability to manage members."}
+            )
+        return attrs
+
+
+class MemberSerializer(serializers.ModelSerializer):
+    """A person on the staff list. Their access is editable; who they are is not."""
+
+    username = serializers.CharField(source="user.username", read_only=True)
+    full_name = serializers.SerializerMethodField()
+    stores = serializers.PrimaryKeyRelatedField(many=True, queryset=Store.objects.none(), required=False)
+    store_names = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Membership
+        fields = [
+            "id",
+            "username",
+            "full_name",
+            "role_label",
+            "is_owner",
+            "permissions",
+            "all_stores",
+            "stores",
+            "store_names",
+            "status",
+            "created_at",
+        ]
+        read_only_fields = ["is_owner", "created_at"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Only this business's branches may be assigned — the field is a write surface, so its
+        # queryset is a tenant boundary, not a convenience.
+        business = self.context.get("business")
+        if business is not None:
+            self.fields["stores"].child_relation.queryset = business.stores.all()
+
+    def get_full_name(self, membership):
+        return membership.user.get_full_name() or membership.user.username
+
+    def get_store_names(self, membership):
+        if membership.all_stores:
+            return ["All stores"]
+        return [store.name for store in membership.stores.all()]
+
+    def validate_permissions(self, value):
+        unknown = sorted(set(value) - set(Feature.values))
+        if unknown:
+            raise serializers.ValidationError(f"Not a feature: {', '.join(unknown)}.")
+        return sorted(set(value))
+
+    def validate(self, attrs):
+        """A business must never be left with nobody who can administer it."""
+        if self.instance and self.instance.is_owner:
+            losing_access = attrs.get("status") == Membership.Status.SUSPENDED
+            losing_rights = Feature.MANAGE_MEMBERS not in attrs.get("permissions", self.instance.permissions)
+            if losing_access or losing_rights:
+                others = Membership.objects.filter(
+                    business=self.instance.business, is_owner=True, status=Membership.Status.ACTIVE
+                ).exclude(pk=self.instance.pk)
+                if not others.exists():
+                    raise serializers.ValidationError(
+                        "This is the only active owner. Make someone else an owner first."
+                    )
+        return attrs
+
+
+class InvitationSerializer(serializers.ModelSerializer):
+    """A pending staff member. The raw token is returned once, on creation, and never again."""
+
+    role_template = serializers.PrimaryKeyRelatedField(queryset=RoleTemplate.objects.none())
+    stores = serializers.PrimaryKeyRelatedField(many=True, queryset=Store.objects.none(), required=False)
+    status = serializers.CharField(read_only=True)
+    invite_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Invitation
+        fields = [
+            "id",
+            "email",
+            "phone",
+            "full_name",
+            "role_template",
+            "role_label",
+            "permissions",
+            "all_stores",
+            "stores",
+            "status",
+            "expires_at",
+            "accepted_at",
+            "invite_url",
+            "created_at",
+        ]
+        read_only_fields = ["role_label", "expires_at", "accepted_at", "created_at"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        business = self.context.get("business")
+        if business is not None:
+            self.fields["role_template"].queryset = business.role_templates.all()
+            self.fields["stores"].child_relation.queryset = business.stores.all()
+
+    def get_invite_url(self, invitation):
+        """Only ever populated on the response to creating it — the token is hashed at rest."""
+        raw = getattr(invitation, "raw_token", None)
+        return f"/invite/{raw}" if raw else None
+
+    def validate(self, attrs):
+        if not attrs.get("email") and not attrs.get("phone"):
+            raise serializers.ValidationError("Give an email address or a phone number to send the invite to.")
+        return attrs
+
+
+class InvitationAcceptSerializer(serializers.Serializer):
+    """Claiming an invitation: the person sets their own password (PRD P6-F3)."""
+
+    token = serializers.CharField()
+    username = serializers.CharField(max_length=150, validators=[UnicodeUsernameValidator()])
+    full_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    password = serializers.CharField(write_only=True, style={"input_type": "password"})
+
+    def validate_username(self, value):
+        value = value.strip()
+        if User.objects.filter(username__iexact=value).exists():
+            raise serializers.ValidationError("That username is already taken.")
+        return value
+
+    def validate(self, attrs):
+        invitation = Invitation.claim(attrs["token"])
+        if invitation is None:
+            # Expired, used and never-existed are deliberately indistinguishable.
+            raise serializers.ValidationError({"token": "This invitation link is not valid any more."})
+        candidate = User(username=attrs["username"])
+        try:
+            validate_password(attrs["password"], user=candidate)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError({"password": list(error.messages)}) from error
+        attrs["invitation"] = invitation
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        first_name, _, last_name = validated_data.get("full_name", "").strip().partition(" ")
+        user = User.objects.create_user(
+            username=validated_data["username"],
+            password=validated_data["password"],
+            first_name=first_name,
+            last_name=last_name.strip(),
+        )
+        validated_data["invitation"].accept(user)
+        return user

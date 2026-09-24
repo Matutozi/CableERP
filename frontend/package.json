@@ -10,7 +10,18 @@
     "e2e": "node e2e/smoke.mjs",
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "e2e:spine": "node e2e/spine.mjs",
+    "e2e:all": "node e2e/smoke.mjs && node e2e/spine.mjs && node e2e/factory-price.mjs && node e2e/permissions.mjs && node e2e/store-scope.mjs && node e2e/invitations.mjs && node e2e/waybill-preview.mjs && node e2e/staff-ui.mjs && node e2e/store-picker.mjs && node e2e/discount.mjs && node e2e/full-journey.mjs",
+    "e2e:factory": "node e2e/factory-price.mjs",
+    "e2e:permissions": "node e2e/permissions.mjs",
+    "e2e:stores": "node e2e/store-scope.mjs",
+    "e2e:invitations": "node e2e/invitations.mjs",
+    "e2e:waybill": "node e2e/waybill-preview.mjs",
+    "e2e:staff": "node e2e/staff-ui.mjs",
+    "e2e:picker": "node e2e/store-picker.mjs",
+    "e2e:discount": "node e2e/discount.mjs",
+    "e2e:journey": "node e2e/full-journey.mjs"
   },
   "dependencies": {
     "react": "^19.1.0",

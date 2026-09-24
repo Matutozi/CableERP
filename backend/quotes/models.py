@@ -35,12 +35,20 @@ class Quote(models.Model):
         SENT = "sent", "Sent"
 
     business = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name="quotes")
+    # Which branch this belongs to. Nullable: records predating stores have no branch to claim
+    # them, and a null is visible business-wide rather than hidden (SYSTEM_DESIGN.md Q32).
+    store = models.ForeignKey(
+        "accounts.Store", on_delete=models.PROTECT, null=True, blank=True, related_name="%(class)ss"
+    )
     reference_number = models.CharField(max_length=32, editable=False)
     customer_name = models.CharField(max_length=200)
     date = models.DateField(default=timezone.localdate)
     staff_name = models.CharField(max_length=200)
     staff_phone = models.CharField(max_length=50, blank=True)
     product_manufacturer = models.CharField(max_length=200, blank=True)
+    # Snapshotted, not read from the profile at print time: reprinting an old quote must show the
+    # customer the comparison they were actually given (SYSTEM_DESIGN.md Q28).
+    show_factory_price = models.BooleanField(default=False)
     transport_cost = models.DecimalField(
         max_digits=15,
         decimal_places=2,
@@ -170,6 +178,25 @@ class Quote(models.Model):
         return [item for item in self.line_items.all() if item.unit_cost is not None]
 
     @property
+    def factory_subtotal(self):
+        """What the whole quote would have cost buying direct, or None if no line has a comparison."""
+        amounts = [line.factory_amount for line in self.line_items.all() if line.factory_amount is not None]
+        return sum(amounts, Decimal("0")) if amounts else None
+
+    @property
+    def total_factory_saving(self):
+        """Total saved against buying direct.
+
+        Compares only the lines that have a factory price, so a quote where one item lacks a
+        comparison still reports an honest saving on the rest rather than a misleading whole-quote
+        figure.
+        """
+        comparable = [line for line in self.line_items.all() if line.factory_amount is not None]
+        if not comparable:
+            return None
+        return sum((line.factory_saving for line in comparable), Decimal("0"))
+
+    @property
     def costed_subtotal(self):
         """Revenue from the lines whose cost is known — the only fair denominator for margin."""
         return money(sum((item.amount for item in self._costed_lines), Decimal("0")))
@@ -236,6 +263,15 @@ class QuoteLineItem(models.Model):
         max_digits=17, decimal_places=COST_DECIMAL_PLACES, null=True, blank=True, editable=False
     )
     cost_basis = models.CharField(max_length=10, blank=True, editable=False)
+    # What the manufacturer would have charged this customer buying direct, frozen at write time.
+    # Null means no comparison was available, which prints as blank rather than a zero saving.
+    factory_price = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(MAX_PRICE)],
+    )
     order = models.PositiveIntegerField(default=0)
 
     class Meta:
@@ -280,6 +316,21 @@ class QuoteLineItem(models.Model):
             return None
         return (margin / self.amount * 100).quantize(Decimal("0.01"))
 
+    @property
+    def factory_amount(self):
+        """What this line would have cost the customer buying direct from the manufacturer."""
+        return None if self.factory_price is None else money(self.total_quantity * self.factory_price)
+
+    @property
+    def factory_saving(self):
+        """What the customer saves on this line by buying here instead.
+
+        None rather than zero when there is no comparison: a line with no factory price should
+        print blank, not claim a saving of nothing.
+        """
+        factory = self.factory_amount
+        return None if factory is None else factory - self.amount
+
 
 class QuoteLineItemColour(models.Model):
     """Quantity of one colour on a line item. Items without colour variants have a single row with colour ""."""
@@ -295,6 +346,22 @@ class QuoteLineItemColour(models.Model):
 
     def __str__(self):
         return f"{self.colour or 'Qty'}: {self.quantity}"
+
+
+def snapshot_factory_prices(quote):
+    """Freeze the manufacturer's direct price onto each line of a quote.
+
+    Same discipline as `snapshot_costs` and for the same reason (SYSTEM_DESIGN.md Q28): reprinting
+    an old quote must show the customer the saving they were actually offered. A line typed free-hand,
+    or one whose catalogue row carries no factory price, stays null and prints blank rather than
+    claiming a saving of zero.
+    """
+    lines = list(quote.line_items.select_related("cable_size", "accessory"))
+    for line in lines:
+        row = line.cable_size or line.accessory
+        line.factory_price = getattr(row, "factory_price", None) if row else None
+    QuoteLineItem.objects.bulk_update(lines, ["factory_price"])
+    return lines
 
 
 def snapshot_costs(quote):

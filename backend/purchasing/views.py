@@ -1,9 +1,11 @@
 from django.db import transaction
 from rest_framework import viewsets
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import IsAuthenticated
 
-from accounts.models import AuditLog, naira, record
-from accounts.utils import get_business
+from accounts.models import AuditLog, Feature, naira, record
+from accounts.permissions import NotRestricted, requires
+from accounts.utils import default_store, get_business, scope_to_current_store, scope_to_stores
 
 from . import costing
 from .models import Purchase
@@ -17,6 +19,9 @@ class PurchasePagination(PageNumberPagination):
 
 
 class PurchaseViewSet(viewsets.ModelViewSet):
+    # The purchase ledger is every supplier and every price paid. Unlike the catalogue there is no
+    # part of it a salesperson needs, so the gate is the whole endpoint rather than its fields.
+    permission_classes = [IsAuthenticated, NotRestricted, requires(Feature.PURCHASES)]
     """Deliveries, and the cost they leave behind on the catalogue.
 
     Every write recomputes the cached cost of the rows it touches. That work is small — one
@@ -27,11 +32,12 @@ class PurchaseViewSet(viewsets.ModelViewSet):
     pagination_class = PurchasePagination
 
     def get_queryset(self):
-        return (
+        queryset = (
             Purchase.objects.filter(business=get_business(self.request))
             .prefetch_related("items__cable_size__cable_type", "items__accessory")
-            .select_related("created_by")
+            .select_related("created_by", "store")
         )
+        return scope_to_current_store(scope_to_stores(queryset, self.request), self.request)
 
     def get_serializer_class(self):
         return PurchaseListSerializer if self.action == "list" else PurchaseSerializer
@@ -53,7 +59,7 @@ class PurchaseViewSet(viewsets.ModelViewSet):
     # impossible, the delivery must not be left behind without it.
     @transaction.atomic
     def perform_create(self, serializer):
-        purchase = serializer.save()
+        purchase = serializer.save(store=default_store(self.request))
         costing.refresh(purchase)
         self._record(purchase)
 

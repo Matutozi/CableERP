@@ -197,6 +197,266 @@ the schema, which is why prices are absent rather than merely hidden in the temp
 
 ---
 
+### Q21. Why can a business not change its own store allowance?
+**Where:** `accounts/models.py:BusinessProfile.store_limit` *(being built)*
+**Decision:** `store_limit` is set by a platform operator through the Django admin. It is readable
+through the API and writable nowhere in it, for any role — owner included.
+**Reasoning:** A limit the limited party can raise is not a limit, it is a preference with extra
+steps. The allowance is the shape a commercial lever takes (PRD P6-F18, plan tiers enforcing
+limits), so it has to sit outside the customer's reach or it can never be priced. Setting it
+per-business rather than deriving it from a plan is deliberate for now: `Subscription` does not
+exist, and a plain integer on the profile is the smallest thing that is still enforceable. When
+plans arrive, the plan supplies the default and this field becomes the per-customer override,
+which is a widening rather than a rewrite.
+**Breaks if changed:** Exposing it on `BusinessProfileSerializer` as writable lets any owner grant
+themselves unlimited stores, and every downstream billing decision built on the allowance becomes
+unenforceable — silently, because nothing errors.
+
+### Q22. What happens when a business ends up over its store allowance?
+**Where:** `accounts/models.py:BusinessProfile.is_over_store_limit`, enforced in the write path
+**Decision:** Lowering the allowance below the number of active stores is **permitted**, and puts
+the business into a restricted state: reads and PDFs continue, ordinary writes are refused, and the
+only write still accepted is deactivating a store. It clears itself the moment active stores are
+back within the allowance.
+**Reasoning:** The operator has to be able to lower an allowance without first negotiating which
+branch a customer gives up — a downgrade that the customer can block is not a downgrade. But the
+system must not choose the branch either: deactivating the wrong store would strand quotes,
+waybills and per-store costs belonging to a live part of the business. Restricting until the owner
+picks puts the decision with the only party who knows which branch matters, while making it
+impossible to ignore. Rejecting the change outright was considered and rejected for the first
+reason; a soft cap that only blocks new stores was rejected because it lets a business sit over
+quota indefinitely, which makes the allowance unenforceable in exactly the way Q21 guards against.
+These are the same semantics as a lapsed subscription (D5), deliberately — one restricted state,
+not two.
+**Breaks if changed:** Auto-deactivating the newest or lowest-numbered store to fit silently
+detaches a branch's documents and cost history, with no record of who decided it or why.
+
+### Q23. How is a member's store access expressed, and why both a flag and a set?
+**Where:** `accounts/models.py:Membership.all_stores` + `Membership.stores` *(being built)*
+**Decision:** Two fields. `all_stores` is a stored boolean meaning every store in the business,
+including ones created later. `stores` is a many-to-many holding an explicit subset, used when
+`all_stores` is false. Both are filled from the role preset at invite time and then stored, exactly
+as `permissions` is.
+**Reasoning:** The requirement is that staff cannot see another branch's trade, because
+cross-branch visibility is how a person builds a picture of a business they have no business
+having. A single nullable FK was the first design and is wrong: a manager may cover Ikeja and
+Surulere but not Aba, which is neither "one" nor "all". The owner picks stores the way you would
+pick tags.
+The boolean is not redundant with an empty set. "Every store" and "these three stores that happen
+to be all of them today" behave differently the moment a fourth store opens: an owner must see it
+without anyone editing their membership, and a regional manager must not. Encoding "all" as an
+empty set would make new stores silently visible to everyone, which is the opposite of the
+requirement.
+Deriving scope from `role` at query time was rejected for the reason Q19 gives: changing what
+"manager" implies later would silently rescope every existing manager.
+**Breaks if changed:** Collapsing the two fields into one makes opening a new branch either invisible
+to its owner or instantly visible to every member scoped to "all the stores that existed then".
+
+### Q26. Why are roles per-business templates instead of three fixed values?
+**Where:** `accounts/models.py:RoleTemplate`, seeded by `provision_business()`
+**Decision:** `Role` is no longer an enum. Each business owns a set of named `RoleTemplate` rows,
+seeded with Owner, Manager and Sales, which it may rename, edit and extend — "Cashier",
+"Storekeeper", whatever its org chart is. Choosing one at invite time **copies** its permissions
+onto the membership; the template is never consulted afterwards.
+**Reasoning:** Three hard-coded roles imposed one org chart on every business on the platform. A
+market trader with two nephews on the counter and a distributor with a warehouse manager, cashiers
+and drivers do not share a structure, and a product that makes them pick the nearest of three words
+is wrong for most of them. Making templates per-business also keeps the Q19 property intact and
+scopes it properly: editing the "Cashier" template next month changes what *new* cashiers start
+with, never what existing ones can do.
+`is_owner` became a stored boolean at the same time, because "owner" can no longer be recognised
+from the role name once the name is the business's to choose.
+Two guards exist because this is the one area where a business can lock itself out: the Owner
+template must keep `manage_members`, and system templates cannot be deleted.
+**Breaks if changed:** Reverting to a global enum forces every business onto one vocabulary.
+Consulting the template at access time instead of copying makes every template edit a retroactive
+grant across everyone who ever held it — Q19's failure, re-introduced one level up.
+
+### Q25. Why does an invitation hold the intended access rather than creating the membership up front?
+**Where:** `accounts/models.py:Invitation` *(being built)*
+**Decision:** An invitation stores the business, the role, the permission set, the store scope and a
+hashed single-use token. The `Membership` is created only when the person accepts and sets a
+password. The staff list a business owner sees merges active memberships with pending invitations.
+**Reasoning:** A membership points at a `User`, and the invited person has no account until they
+accept, so a membership created up front would need a null user — which breaks the one-membership-
+per-user constraint and puts a half-real row in the table every permission check has to skip.
+Keeping the intended access on the invitation means the owner still configures everything at invite
+time, as they asked; the record just lives somewhere honest until there is a person to attach it to.
+The token is stored hashed, matching the `PasswordReset.code_hash` pattern the PRD already uses: an
+invitation link grants access to a business's data, so a database leak should not be a set of
+working keys. Resending therefore issues a new token rather than re-sending the old one.
+**Breaks if changed:** A nullable `Membership.user` makes every access check carry a "and the user
+exists" clause, and the unique constraint stops protecting against duplicate memberships.
+
+### Q24. Why is discounting a permission rather than a per-business policy?
+**Where:** `accounts/models.py:Feature.DISCOUNT`, enforced in `quotes/serializers.py`
+**Decision:** Selling below the catalogue price is a grantable permission like any other. A member
+who holds it may price a line freely; one who does not is held to the catalogue price. It is
+granted per person, and role templates group it however a business likes.
+**Reasoning:** `unit_price` is per-line and client-supplied, so hiding cost stops a salesperson
+knowing the floor but not selling beneath it. That is the actual fraud route.
+The first design was a four-mode policy field on the business — free, logged, capped, none. That was
+wrong: it invented a **second configuration mechanism** beside the one the product already has, and
+it hardcoded a fixed set of postures every business had to choose between. Permissions are already
+stored per member (Q19) and grouped by templates the business defines (Q26), so a trader who trusts
+everyone grants it to everyone, a distributor grants it to nobody below manager, and neither has to
+pick from a menu somebody else wrote. One mechanism, not two.
+**Logged, but only where the log means something.** A below-catalogue line is recorded when the
+person lacks `catalogue_edit`, and not when they hold it — someone who can change the list price
+outright discounts by definition, so logging them is noise that would bury the entries that matter.
+A percentage cap was considered and dropped: it is a third mechanism again, and nobody has asked for
+one. A permission plus a record answers the question that was actually being asked.
+**Breaks if changed:** Resolving it from a business-level field means every business on the platform
+picks from the same fixed postures, and the per-person question — *may **this** cashier discount?* —
+cannot be expressed at all.
+
+### Q27. Why is `factory_price` a separate mixin instead of a field on `CostedItem`?
+**Where:** `catalogue/models.py:FactoryPriced`, mixed into `CableSize` and `Accessory`
+**Decision:** A second abstract base carrying `factory_price` and `factory_price_updated_at`, beside
+`CostedItem` rather than inside it.
+**Reasoning:** `CostedItem` documents an invariant that Q5 depends on — **only `costing.py` writes
+these fields**, which is what makes `manage.py rebuild_costs` safe to run at any time. The factory
+price is typed in by the owner and must never be touched by a rebuild. Putting a hand-edited field
+on that base would make the docstring a lie and invite a future rebuild to clear it.
+The two numbers are also opposites. `last_unit_cost` is what the distributor paid, sits *below* the
+selling price, and is confidential. `factory_price` is what the manufacturer would charge the
+customer buying direct, sits *above* the selling price, and exists to be shown. Keeping them on
+separate bases makes that distinction structural rather than a matter of remembering.
+**Breaks if changed:** A factory price on `CostedItem` is one careless `rebuild_costs` away from
+being wiped, and one wrong field reference away from printing the distributor's buying position on
+a document handed to their customer.
+
+### Q28. Why is the factory price snapshotted onto the quote line, and validated above the sale price?
+**Where:** `quotes/models.py:QuoteLineItem.factory_price`, validated in `quotes/serializers.py`
+**Decision:** The figure is copied onto the line when the quote is written, and a factory price at
+or below the line's own price is rejected.
+**Reasoning:** Snapshotting follows the document rule (Q6): reprinting last month's quote must show
+the customer the discount they were actually offered, not one recomputed from today's figures. A
+saving that changes after the fact is an argument waiting to happen.
+The validation exists because the ordering `cost < sale price < factory price` is what the feature
+means. A factory price below the sale price is never a real discount — it is a stale figure, or
+somebody has typed the purchase cost into the wrong box. Printing the resulting negative saving
+would both look broken and, in the second case, disclose what the distributor paid.
+**Breaks if changed:** Reading the factory price live at print time makes historical quotes
+unreproducible. Dropping the validation lets a mistyped cost reach a customer-facing PDF.
+
+### Q29. Why do endpoint gates and field gates both exist, and why does the field gate fail closed?
+**Where:** `accounts/permissions.py` — `member_can`, `requires`, `HidesRestrictedFields`
+**Decision:** Two mechanisms over one predicate. `requires(feature)` refuses a whole view;
+`HidesRestrictedFields` removes keys from a payload. Both call `member_can`, and the field gate
+hides its fields when the request is absent from the serializer context.
+**Reasoning:** The requirements need both shapes. A salesperson has no business reading the purchase
+ledger at all, so that is an endpoint refusal. But they cannot quote without reading the catalogue,
+so cost has to come out of a response that still succeeds (PRD P6-F5). One mechanism cannot do both
+without either breaking quoting or leaving the ledger open.
+Fields are *dropped* rather than blanked so nothing downstream — a nested serializer, a `.values()`
+call, an export written next year — can reach a value that was never declared.
+**Failing closed** matters because the alternative failed silently. The only callers without a
+request are internal, and a security control that defaults to permissive is one bad wiring away
+from leaking: exactly what happened to `ItemHistorySerializer`, which was instantiated without
+context and would have served a full cost time series to anyone.
+**Breaks if changed:** Repeating the check per view guarantees the next view forgets it. Defaulting
+to permissive turns every missing `context={"request": request}` into a silent disclosure.
+
+### Q30. Why is there a test that walks the URL conf instead of testing each endpoint?
+**Where:** `accounts/test_no_leaks.py`
+**Decision:** One suite enumerates every registered `api/` route, calls each as a member holding
+neither `view_costs` nor `bank_details`, and fails if any response contains a cost key, the cost
+value, or the bank account number.
+**Reasoning:** Gating endpoints one at a time is whack-a-mole — the ninth endpoint added next month
+will not be gated and no existing test will notice, because tests are written alongside the code
+they cover and a new endpoint arrives with tests that assert it *works*, not that it withholds.
+Enumerating inverts that: a new route is covered the day it is registered, by a test nobody has to
+remember. It found two leaks the hand-written list had missed, `/api/profile/` serving the account
+number being the worse one.
+It asserts on the *value* as well as the key, so renaming a field cannot quietly re-open the hole,
+and it asserts that the walk visited something, so a broken URL substitution cannot make every
+check pass by visiting nothing.
+**Breaks if changed:** Dropping it returns the codebase to hoping each new endpoint's author
+remembers a permission class.
+
+### Q31. Why can a quote override the payment account, and why is that gated so tightly?
+**Where:** `quotes/serializers.py` — the payment fields, guarded by `Feature.BANK_DETAILS`
+**Decision:** A quote's `payment_bank_name` / `payment_account_name` / `payment_account_number` may
+be set per quote, defaulting to the business profile. Only members holding `bank_details` may set
+them, and every override writes an audit entry naming the person and the quote.
+**Reasoning:** Sellers genuinely need this — a particular order collected into a particular account,
+a branch's own account, a customer paying a specific way. The fields already existed as snapshots
+(Q6); they were simply unwritable.
+The guard exists because this is the single best fraud route in the product. Someone who can type
+any account number onto a quote can type *their own*, and the customer pays them instead of the
+business. That is the same power the profile's bank fields carry, which is why those need both the
+permission and a password re-check (Q15).
+A password on every quote was rejected: profile changes are rare and permanent, whereas an override
+may be routine, and a control that makes the feature tedious pushes sellers back to writing
+quotations in WhatsApp. So prevention where it is cheap — the permission — and detection where
+prevention would cost too much — the audit entry. An override that is logged and attributable is a
+poor way to steal.
+**Breaks if changed:** Making the fields writable without the permission check hands every
+salesperson a way to redirect customer payments, with the quote PDF making it look official.
+
+### Q32. How is store scoping applied, and why does every document carry a store?
+**Where:** `store` on `Quote`, `Waybill`, `Purchase` and `AuditLog`; `accounts/utils.py:scope_to_stores`
+**Decision:** Each document and each audit entry belongs to a store. Every queryset filters through
+one helper that reads `Membership.visible_stores()`, the way tenancy already funnels through
+`get_business()`. Records whose store is null are visible to everyone in the business.
+**Reasoning:** Staff must not see another branch's trade, and the membership already records who may
+see what (Q23) — there was simply nothing to filter against. Putting the FK on the documents rather
+than inferring the branch from the author means a record stays with its branch even after the person
+who wrote it leaves or moves.
+`AuditLog` carries it for the same reason the documents do: the history is a second route to the
+same information, and a scoping rule applied to quotes but not to the log of quote activity is not
+a scoping rule.
+**Null means business-wide, not hidden.** Profile and bank changes are not a branch's doing, and
+records predating this migration have no branch to claim them. Hiding nulls would blank the history
+of every existing business on upgrade; showing them keeps the log honest and errs toward the
+behaviour people already have.
+**Reference numbers deliberately do not carry a store code** (PRD P6-F25 deferred). The numbering is
+unique per business per day, and adding a branch segment would change that rule for every existing
+quote. Scoping works without it.
+**Breaks if changed:** Filtering per view instead of through the helper means the next viewset
+forgets, and forgetting is invisible — the data simply looks complete to whoever is looking.
+
+### Q33. Why is the store selector a view filter rather than an access control?
+**Where:** `accounts/utils.py:current_store`, applied after `scope_to_stores`
+**Decision:** A member who can see several branches may pick one to work in. The choice narrows
+what they see and decides which branch new records are filed under. It is stored in the session,
+and it can only ever select from the branches `Membership.visible_stores()` already allows.
+**Reasoning:** Two different questions get confused here, and keeping them apart is the whole point.
+*What may this person see?* is access, answered by the membership and enforced in `scope_to_stores`.
+*What do they want to look at right now?* is a preference, answered by the selector. If the selector
+were the access control, clearing it — or a stale session, or a crafted request — would widen what
+someone can reach. Layering it **after** the security filter means the worst a bad value can do is
+show too little.
+Storing it in the session rather than the membership row keeps it per-device: an owner checking Aba
+from their phone should not change what their laptop shows.
+A stale or out-of-scope id falls through to "all my branches" rather than erroring, for the same
+reason the business selector does (Q20) — a member whose access changed should find the app working,
+not broken.
+**Breaks if changed:** Using the selector to decide access means an unset session value is
+indistinguishable from permission to see everything, and the store scope stops being enforceable.
+
+### Q34. What can a restricted business still do, and why is it not simply locked out?
+**Where:** `accounts/models.py:BusinessProfile.status`, `accounts/permissions.py:NotRestricted`
+**Decision:** An operator sets a business to `restricted` in the Django admin. Reads continue,
+existing PDFs still download, and every write is refused with a message naming the reason. Only an
+operator can lift it; nothing in the API can.
+**Reasoning:** This is the lever for a trial that has not been paid for, so it has to be firm. But a
+hard lockout is the wrong shape twice over. Practically, the business's own records are theirs — a
+customer behind on payment asking for last month's quote should get it, and holding data hostage is
+a bad look and, in some jurisdictions, worse than that. Commercially, someone who can still see
+everything they built and simply cannot add to it has a far stronger reason to pay than someone
+staring at a login error, who has already lost the thread.
+Read-only rather than a `403` everywhere also means the app degrades honestly: the seller sees their
+catalogue and their quotes, and finds out why the moment they try to save.
+It reuses the shape of the member gates (Q29) rather than inventing one: a DRF permission class over
+`SAFE_METHODS`, sitting alongside `requires()`.
+`status` on the profile rather than a `Subscription` field because there is no subscription yet.
+When billing arrives it writes to this field instead of replacing it, which is a widening rather
+than a migration.
+**Breaks if changed:** Refusing reads too means a business that pays a week late cannot retrieve
+records it made while paying, and the restriction becomes a reason to churn rather than to settle.
+
 ## Part 4 — Configuration and safety
 
 ### Q13. Why does `settings.py` refuse to start without a secret key?

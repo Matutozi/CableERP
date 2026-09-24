@@ -194,6 +194,7 @@ export default function QuotePreview() {
               <tr>
                 <th className="sn">S/N</th>
                 <th>Description</th>
+                {quote.show_factory_price && <th className="num">Factory (₦)</th>}
                 <th className="num">Price (₦)</th>
                 <th className="num">Qty</th>
                 <th className="num">Amount (₦)</th>
@@ -204,6 +205,9 @@ export default function QuotePreview() {
                 <tr className="doc-main">
                   <td className="sn">{index + 1}</td>
                   <td>{item.description}</td>
+                  {quote.show_factory_price && (
+                    <td className="num quote-factory">{nairaOrDash(item.factory_price)}</td>
+                  )}
                   <td className="num">{formatNaira(item.unit_price)}</td>
                   <td className="num">
                     {formatQty(item.total_quantity)} {unitLabel(item.unit, item.total_quantity)}
@@ -216,6 +220,7 @@ export default function QuotePreview() {
                     <tr key={entry.id} className="doc-colour">
                       <td />
                       <td>{entry.colour}</td>
+                      {quote.show_factory_price && <td />}
                       <td />
                       <td className="num">{formatQty(entry.quantity)}</td>
                       <td />
@@ -243,6 +248,12 @@ export default function QuotePreview() {
             <span>Grand total</span>
             <span>₦{formatNaira(quote.grand_total)}</span>
           </div>
+          {quote.show_factory_price && toNumber(quote.total_factory_saving) > 0 && (
+            <div className="quote-saving">
+              <span>You save</span>
+              <span>₦{formatNaira(quote.total_factory_saving)}</span>
+            </div>
+          )}
         </div>
 
         {(payment.bank || payment.accountNumber || terms.length > 0) && (

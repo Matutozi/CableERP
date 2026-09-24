@@ -4,11 +4,12 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
-from accounts.models import BusinessProfile
+from accounts.models import AuditLog, BusinessProfile, Feature, record
+from accounts.permissions import HidesRestrictedFields, member_can
 from catalogue.models import FRACTIONAL_UNITS, MAX_PRICE, MAX_QUANTITY
 from catalogue.serializers import BusinessAccessoryField, BusinessCableSizeField
 
-from .models import Quote, QuoteLineItem, QuoteLineItemColour, snapshot_costs
+from .models import Quote, QuoteLineItem, QuoteLineItemColour, snapshot_costs, snapshot_factory_prices
 
 TOTAL_FIELD = {"max_digits": 20, "decimal_places": 2, "read_only": True}
 # Bounds so a line can never hold a number the totals cannot represent (see MAX_PRICE / MAX_QUANTITY).
@@ -24,6 +25,10 @@ PERCENTAGE_FIELD = {"max_digits": 7, "decimal_places": 2, "read_only": True}
 # them listed here means that is one edit rather than an audit of every endpoint.
 LINE_COST_FIELDS = ["unit_cost", "cost_amount", "margin_amount", "margin_percentage"]
 QUOTE_COST_FIELDS = ["total_cost", "costed_subtotal", "total_margin", "margin_percentage", "margin_coverage"]
+# The factory comparison, listed apart from the cost fields because it is shown to the customer
+# while those must never be (SYSTEM_DESIGN.md Q27).
+LINE_FACTORY_FIELDS = ["factory_price", "factory_amount", "factory_saving"]
+QUOTE_FACTORY_FIELDS = ["show_factory_price", "factory_subtotal", "total_factory_saving"]
 
 
 class QuoteLineItemColourSerializer(serializers.ModelSerializer):
@@ -43,7 +48,7 @@ class QuoteLineItemColourSerializer(serializers.ModelSerializer):
         return value
 
 
-class QuoteLineItemSerializer(serializers.ModelSerializer):
+class QuoteLineItemSerializer(HidesRestrictedFields, serializers.ModelSerializer):
     cable_size = BusinessCableSizeField(required=False, allow_null=True)
     accessory = BusinessAccessoryField(required=False, allow_null=True)
     unit_price = serializers.DecimalField(**PRICE_FIELD)
@@ -51,7 +56,9 @@ class QuoteLineItemSerializer(serializers.ModelSerializer):
     description = serializers.CharField(read_only=True)
     total_quantity = serializers.DecimalField(**TOTAL_FIELD)
     amount = serializers.DecimalField(**TOTAL_FIELD)
+    factory_price = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
     unit_cost = serializers.DecimalField(**COST_FIELD)
+    restricted_fields = {Feature.VIEW_COSTS: LINE_COST_FIELDS}
     cost_amount = serializers.DecimalField(**TOTAL_FIELD)
     margin_amount = serializers.DecimalField(**TOTAL_FIELD)
     margin_percentage = serializers.DecimalField(**PERCENTAGE_FIELD)
@@ -74,6 +81,7 @@ class QuoteLineItemSerializer(serializers.ModelSerializer):
             "total_quantity",
             "amount",
             *LINE_COST_FIELDS,
+            *LINE_FACTORY_FIELDS,
         ]
         read_only_fields = ["id", "order"]
 
@@ -104,7 +112,12 @@ class QuoteLineItemSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class QuoteSerializer(serializers.ModelSerializer):
+# Redirecting where a customer pays is the sharpest edge in the product, so the fields that do it
+# are writable only by members who may change bank details at all (SYSTEM_DESIGN.md Q31).
+QUOTE_PAYMENT_FIELDS = ["payment_bank_name", "payment_account_name", "payment_account_number"]
+
+
+class QuoteSerializer(HidesRestrictedFields, serializers.ModelSerializer):
     line_items = QuoteLineItemSerializer(many=True)
     transport_cost = serializers.DecimalField(required=False, **PRICE_FIELD)
     vat_percentage = serializers.DecimalField(
@@ -119,6 +132,18 @@ class QuoteSerializer(serializers.ModelSerializer):
     total_margin = serializers.DecimalField(**TOTAL_FIELD)
     margin_percentage = serializers.DecimalField(**PERCENTAGE_FIELD)
     margin_coverage = serializers.JSONField(read_only=True)
+    restricted_fields = {Feature.VIEW_COSTS: QUOTE_COST_FIELDS}
+
+    def get_fields(self):
+        fields = super().get_fields()
+        # Visible to everyone — the customer is told where to pay — but settable only by those who
+        # may change bank details. Read-only rather than hidden, or the quote would print no
+        # payment box for a salesperson.
+        if not member_can(self.context.get("request"), Feature.BANK_DETAILS):
+            for name in QUOTE_PAYMENT_FIELDS:
+                if name in fields:
+                    fields[name].read_only = True
+        return fields
 
     class Meta:
         model = Quote
@@ -145,6 +170,7 @@ class QuoteSerializer(serializers.ModelSerializer):
             "vat_amount",
             "grand_total",
             *QUOTE_COST_FIELDS,
+            *QUOTE_FACTORY_FIELDS,
             "created_at",
             "updated_at",
         ]
@@ -152,12 +178,95 @@ class QuoteSerializer(serializers.ModelSerializer):
             "reference_number",
             "sent_at",
             "revision_of",
-            "payment_bank_name",
-            "payment_account_name",
-            "payment_account_number",
             "created_at",
             "updated_at",
         ]
+
+    def _catalogue_price(self, line):
+        """What the catalogue says this line should cost, or None for a free-typed item.
+
+        A line typed by hand has no catalogue entry to compare against, so nothing is enforced on
+        it. That is a real gap rather than an oversight: the alternative is refusing to quote
+        anything not already in the catalogue, which is how sellers actually work at a counter.
+        """
+        row = line.get("cable_size") or line.get("accessory")
+        return getattr(row, "default_price", None)
+
+    def validate(self, attrs):
+        """Hold members without `discount` to the catalogue price (SYSTEM_DESIGN.md Q24).
+
+        `unit_price` is client-supplied, so hiding cost stops a salesperson knowing the floor but
+        not selling beneath it. This is the check that does.
+        """
+        attrs = super().validate(attrs)
+        request = self.context.get("request")
+        if member_can(request, Feature.DISCOUNT):
+            return attrs
+
+        below = []
+        for index, line in enumerate(attrs.get("line_items") or [], start=1):
+            catalogue_price = self._catalogue_price(line)
+            if catalogue_price is not None and line.get("unit_price") is not None:
+                if line["unit_price"] < catalogue_price:
+                    below.append(f"line {index} at {line['unit_price']} against {catalogue_price}")
+        if below:
+            raise serializers.ValidationError(
+                {
+                    "line_items": (
+                        "You cannot price below the catalogue: "
+                        + "; ".join(below)
+                        + ". Ask someone who can approve a discount."
+                    )
+                }
+            )
+        return attrs
+
+    def _log_discounts(self, quote):
+        """Record below-catalogue lines by people who cannot set the list price.
+
+        Not logged for anyone holding `catalogue_edit`: they could lower the catalogue price
+        outright, so recording their discounts would bury the entries that matter under noise.
+        """
+        request = self.context.get("request")
+        if member_can(request, Feature.CATALOGUE_EDIT):
+            return
+        for line in quote.line_items.select_related("cable_size", "accessory"):
+            row = line.cable_size or line.accessory
+            catalogue_price = getattr(row, "default_price", None)
+            if catalogue_price is None or line.unit_price >= catalogue_price:
+                continue
+            record(
+                quote.business,
+                getattr(request, "user", None),
+                AuditLog.Action.LINE_DISCOUNTED,
+                f"{line.description}: {line.unit_price} instead of {catalogue_price}",
+                reference=quote.reference_number,
+                store=quote.store,
+            )
+
+    def _log_payment_override(self, quote, business):
+        """Record a quote whose payment account differs from the business's own.
+
+        The permission stops a salesperson doing this at all; the log is what makes an override by
+        someone who *may* do it attributable afterwards.
+        """
+        profile_details = (
+            business.bank_name,
+            business.account_name or business.business_name,
+            business.account_number,
+        )
+        quote_details = (quote.payment_bank_name, quote.payment_account_name, quote.payment_account_number)
+        if quote_details == profile_details:
+            return
+        request = self.context.get("request")
+        record(
+            business,
+            getattr(request, "user", None),
+            AuditLog.Action.QUOTE_PAYMENT_OVERRIDE,
+            f"Payment account set to {quote.payment_account_number or '—'} "
+            f"({quote.payment_bank_name or 'no bank'}) instead of the business account",
+            reference=quote.reference_number,
+        )
 
     def validate_date(self, value):
         """The quote date drives the reference number, so a future one misfiles the quote too."""
@@ -179,17 +288,25 @@ class QuoteSerializer(serializers.ModelSerializer):
         business = BusinessProfile.objects.select_for_update().get(pk=self.context["business"].pk)
         validated_data.setdefault("vat_percentage", business.vat_rate)
         validated_data.setdefault("date", timezone.localdate())
+        # Defaults first, then whatever was posted, so an explicit payment override or factory
+        # toggle wins while everything unspecified falls back to the profile. Both are frozen onto
+        # the quote either way: a later profile edit must not rewrite a quote already sent (Q6).
+        defaults = {
+            "payment_bank_name": business.bank_name,
+            "payment_account_name": business.account_name or business.business_name,
+            "payment_account_number": business.account_number,
+            "show_factory_price": business.show_factory_price,
+        }
         quote = Quote.objects.create(
             business=business,
             reference_number=Quote.next_reference_number(business, validated_data["date"]),
-            # Freeze where the customer should pay, so a later profile edit cannot rewrite it.
-            payment_bank_name=business.bank_name,
-            payment_account_name=business.account_name or business.business_name,
-            payment_account_number=business.account_number,
-            **validated_data,
+            **{**defaults, **validated_data},
         )
         self._save_line_items(quote, items)
         snapshot_costs(quote)
+        snapshot_factory_prices(quote)
+        self._log_payment_override(quote, business)
+        self._log_discounts(quote)
         return quote
 
     @transaction.atomic
@@ -211,6 +328,9 @@ class QuoteSerializer(serializers.ModelSerializer):
         # Re-costed on every save while the quote is a draft; the save that marks it sent is the
         # last one this method allows, so that is where the figures freeze.
         snapshot_costs(instance)
+        snapshot_factory_prices(instance)
+        self._log_payment_override(instance, instance.business)
+        self._log_discounts(instance)
         return instance
 
     def _save_line_items(self, quote, items):
@@ -222,9 +342,10 @@ class QuoteSerializer(serializers.ModelSerializer):
             )
 
 
-class QuoteListSerializer(serializers.ModelSerializer):
+class QuoteListSerializer(HidesRestrictedFields, serializers.ModelSerializer):
     grand_total = serializers.DecimalField(**TOTAL_FIELD)
     total_margin = serializers.DecimalField(**TOTAL_FIELD)
+    restricted_fields = {Feature.VIEW_COSTS: ["total_margin"]}
 
     class Meta:
         model = Quote

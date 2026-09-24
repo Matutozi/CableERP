@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from accounts.models import BusinessProfile
+from accounts.models import BusinessProfile, provision_business
 from catalogue.models import CableSize, CableType, record_price
 
 PROFILE = {
@@ -99,6 +99,10 @@ class Command(BaseCommand):
             self.stdout.write(f"User {username!r} already exists; password left unchanged.")
 
         profile, _ = BusinessProfile.objects.get_or_create(user=user, defaults=PROFILE)
+        # The same seam registration uses. A seeded stack that skipped this would exercise the
+        # legacy fallback rather than the path real businesses take — exactly the difference that
+        # makes a smoke test pass while production is broken.
+        provision_business(profile, user)
 
         for type_order, (name, unit, colours, sizes) in enumerate(CATALOGUE):
             cable_type, _ = CableType.objects.get_or_create(

@@ -21,11 +21,12 @@
 6. [Domain glossary](#6-domain-glossary)
 7. [Phase roadmap](#7-phase-roadmap)
 8. [Phase 1 — Quote builder](#8-phase-1--quote-builder-shipped)
-9. [Phase 2 — Cost and margin](#9-phase-2--cost-and-margin-built-not-deployed)
+9. [Phase 2 — Cost and margin](#9-phase-2--cost-and-margin-shipped)
 10. [Phase 3 — Sales and customers](#10-phase-3--sales-and-customers-planned)
 11. [Phase 4 — Reporting](#11-phase-4--reporting-planned)
 12. [Phase 5 — Inventory](#12-phase-5--inventory-planned)
 13. [Phase 6 — Platform, multi-user and SaaS](#13-phase-6--platform-multi-user-and-saas-next)
+13a. [Phase 7 — Expenses](#13a-phase-7--expenses-planned)
 14. [Cross-cutting requirements](#14-cross-cutting-requirements)
 15. [Architecture](#15-architecture)
 16. [Operations](#16-operations)
@@ -224,8 +225,9 @@ addition afterwards. The app must never block a sale because the data isn't set 
 | 2 | Cost and margin | **Shipped** — deployed 22 Sep 2026 | 1 | Never sell below cost |
 | — | Waybills | **Shipped** — built ahead of Phase 3 (see §10.5) | 1 | The driver carries a price-free delivery note |
 | 3 | Sales and customers | Planned | 1 | Know what was actually sold, and to whom |
-| 4 | Reporting | Planned | 2, 3 | Revenue, profit and trends |
+| 4 | Reporting | Planned | 2, 3, 7 | Revenue, profit and trends |
 | 5 | Inventory | Planned | 2, 3 | Know what is in the warehouse |
+| 7 | Expenses | Planned | 6 | What the business spends to trade, so profit is real and not just margin |
 | 6 | Platform, multi-user and SaaS | **Next** — resequenced 23 Sep 2026 | 1 | Staff logins, stores, modules, other businesses, revenue |
 
 **Sequencing rationale.** Phase 2 precedes Phase 3 because cost is cheap to add and immediately
@@ -344,6 +346,62 @@ AuditLog         business user action summary reference created_at
   WhatsApp code needs a provider account. Workaround is `manage.py changepassword`. Resolved in
   Phase 6.
 - Uploaded logos are on local disk, not object storage.
+
+### 8.8 Factory price column *(requested, not built)*
+
+Some distributors want the quotation to show the **factory price** beside their own, so the customer
+can see what they are saving. Others would never show it. It is therefore a toggle, not a layout
+change.
+
+**Definition.** The factory price is what the manufacturer would charge *this customer* if they
+bypassed the distributor and bought direct. It is a competitive comparison — "buying from me costs
+you less than going to the factory yourself" — and it is the distributor's sales argument for
+existing at all.
+
+It is **not** what the distributor paid. That is `last_unit_cost`, it is confidential, and the two
+numbers sit on opposite sides of the selling price:
+
+```
+        last_unit_cost   <   selling price   <   factory price
+        (what you paid)      (what you quote)    (what they would pay direct)
+        CONFIDENTIAL                             SHOWN WHEN TOGGLED ON
+```
+
+Because of that ordering, a factory price **below** the quoted price is almost always a data error —
+a stale figure, or someone has typed the cost in by mistake. The system should say so rather than
+print a negative saving to a customer.
+
+| ID | Requirement |
+|---|---|
+| P1-F24 | A catalogue item may carry a factory price — what the manufacturer would charge an end buyer going direct |
+| P1-F25 | A quote may show a factory price column, with the saving per line and in total |
+| P1-F26 | The toggle is per quote, defaulting to a business-level preference |
+| P1-F27 | The factory price is **snapshotted onto the line** when the quote is written, like every other figure on a document |
+| P1-F28 | A line with no factory price shows nothing rather than a zero, and is excluded from the saving total |
+| P1-F29 | A factory price at or below the quoted price is refused with a warning — it means a stale figure or cost typed in by mistake, and would print a negative saving |
+| P1-F30 | A factory price records when it was last updated, so a seller can see at a glance which figures have gone stale |
+
+**The trap.** These are two different numbers on opposite sides of the price, and the implementation
+must never derive one from the other. `last_unit_cost` reaching a customer-facing document would
+hand them the distributor's buying position — the thing the waybill's price-free layout and the
+separate `view_costs` permission exist to prevent. A single wrong field reference in the discount
+column does exactly that.
+
+Snapshotting matters for the same reason payment details are snapshotted (§5, principle P1): if the
+factory price is read live at print time, reprinting last month's quote shows the customer a
+different discount than the one they were offered.
+
+**Open question.** Where does the number come from? The manufacturer's price list changes, and the
+distributor learns it periodically rather than continuously.
+
+- **Per catalogue item**, maintained by the seller — less work per quote, but it goes stale, and a
+  discount claimed against last year's factory price is one the customer can disprove.
+- **Per quote line**, typed when it is worth quoting against — always current, retyped every time.
+- **Both** — a maintained default that can be overridden on the line. Probably right, and the most
+  UI on a phone screen.
+
+P1-F30 exists because whichever is chosen, staleness is the failure mode that embarrasses a seller
+in front of a customer.
 
 ---
 
@@ -842,8 +900,8 @@ schema drift and upgrades that break one client and not another. CableERP keeps 
 fully deployed, with a registry table deciding what each tenant sees.
 
 **Candidate modules.** Existing: `core`, `catalogue`, `purchasing`, `costs`, `price_history`,
-`quotes`, `waybills`, `activity`. Planned: `customers`, `suppliers`, `sales`, `inventory`,
-`metrics`, `einvoicing`, `messaging`. Note that `customer_name` on a quote and `supplier_name` on a
+`quotes`, `waybills`, `activity`. Planned: `customers`, `suppliers`, `sales`, `expenses`,
+`inventory`, `metrics`, `einvoicing`, `messaging`. Note that `customer_name` on a quote and `supplier_name` on a
 purchase are free text today — neither entity exists, and nothing tracks stock on hand.
 
 `metrics` is a consumer, never a producer: it must read whatever is enabled and degrade quietly when
@@ -967,6 +1025,61 @@ work can run on its own track throughout, since it touches presentation only.
 **The sequencing trap.** Do not start the new modules — `customers`, `inventory`, `sales` — until
 the spine is finished. Each would be written against a business-level scope and then rewritten
 against a store-level one.
+
+---
+
+## 13a. Phase 7 — Expenses *(planned)*
+
+### 13a.1 Goal
+
+Record what the business spends to trade — rent, fuel, generator diesel, salaries, transport, bank
+charges — so the owner can see **profit**, not just margin.
+
+### 13a.2 Why this is a separate module, not part of purchasing
+
+`purchasing` already records money going out, so the temptation is to reuse it. That would be wrong,
+and the distinction is the whole design:
+
+- A **purchase** buys stock. Its cost attaches to a catalogue item, feeds `landed_unit_cost`, and is
+  recovered when that item sells. It is cost *of goods*.
+- An **expense** buys nothing resaleable. Diesel is consumed, rent buys a month, a salary buys
+  labour. It attaches to a period and a store, never to an item.
+
+Putting diesel through `purchasing` would corrupt every landed cost it touched, and `rebuild_costs`
+would faithfully reproduce the corruption. They are different ledgers because they answer different
+questions: purchasing answers *"what will a refill cost?"*, expenses answer *"did we make money
+this month?"*
+
+### 13a.3 What it unlocks
+
+Today the product can state gross margin — selling price minus replacement cost. It cannot state
+profit, because nothing knows the business spent ₦180,000 on diesel. Phase 4 reporting is therefore
+**dependent on this phase** for any net figure; without it, "profit" in a report would mean gross
+margin wearing the wrong label, which is worse than omitting it.
+
+### 13a.4 Functional requirements
+
+| ID | Requirement |
+|---|---|
+| P7-F1 | Record an expense: date, amount, category, store, payee, note, optional receipt image |
+| P7-F2 | Categories are per business and editable, seeded with a Nigerian default set (rent, fuel/diesel, salaries, transport, utilities, bank charges, repairs, other) |
+| P7-F3 | Expenses belong to a **store**, so a branch's running costs are its own (follows P6-F22) |
+| P7-F4 | Recurring expenses — rent, salaries — are declared once and generated per period, not retyped |
+| P7-F5 | An expense is editable until the period is closed, then corrected by a reversing entry rather than an edit |
+| P7-F6 | Attaching a receipt photo, since Nigerian expenses are overwhelmingly cash with paper proof |
+| P7-F7 | Access is a permission (`expenses`), and seeing totals is separable from recording one |
+| P7-F8 | Weighted average cost (`average_unit_cost`) plus expenses give net profit per period, per store |
+
+### 13a.5 Open questions
+
+- **Cash versus accrual.** Recording on payment is simpler and matches how these businesses think.
+  Accrual is correct once there are creditors. Starting cash, and saying so, is probably right.
+- **Does an expense ever attach to a purchase?** Clearing costs on an imported container genuinely
+  belong to landed cost, and `Purchase.additional_cost` already handles that case. The line to hold:
+  if it makes a delivered item cost more, it is purchasing; otherwise it is an expense.
+- **Period closing.** P7-F5 assumes periods exist. Nothing in the product has one yet.
+- **Who sees what.** A store manager seeing their branch's fuel bill is reasonable; the same person
+  seeing salaries is not. This may need expense categories to carry their own visibility.
 
 ---
 

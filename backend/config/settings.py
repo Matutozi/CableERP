@@ -110,15 +110,27 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["accounts.authentication.SessionAuthentication"],
-    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    # NotRestricted is a default rather than per-view: a restricted business must be read-only
+    # everywhere, and a gate each view has to remember is a gate some view will forget
+    # (SYSTEM_DESIGN.md Q34). Views that set permission_classes replace this list, so the ones that
+    # do — login, register, accept-invite — are deliberately exempt; a restricted business's owner
+    # must still be able to sign in and see their records.
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+        "accounts.permissions.NotRestricted",
+    ],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     # Throttles use Django's cache. The default local-memory cache counts per process,
     # so give the deployment a shared cache (Redis) once it runs more than one worker.
+    # Rates are configuration, not policy: an operator may need to loosen them for a load test or
+    # tighten them under attack, and the browser suite signs in far more often than a person would.
+    # The defaults are the production values; nothing has to be set for them to apply.
     "DEFAULT_THROTTLE_RATES": {
-        "auth": "10/min",  # sign-in attempts, per IP
-        "login_username": "5/min",  # sign-in attempts against one account, from any address
-        "register": "20/hour",  # new accounts, per IP
-        "pdf": "60/hour",  # PDF renders, per user
+        "auth": os.environ.get("DJANGO_THROTTLE_AUTH", "10/min"),  # sign-in attempts, per IP
+        # sign-in attempts against one account, from any address
+        "login_username": os.environ.get("DJANGO_THROTTLE_LOGIN_USERNAME", "5/min"),
+        "register": os.environ.get("DJANGO_THROTTLE_REGISTER", "20/hour"),  # new accounts, per IP
+        "pdf": os.environ.get("DJANGO_THROTTLE_PDF", "60/hour"),  # PDF renders, per user
     },
 }
 

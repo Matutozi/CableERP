@@ -1,10 +1,12 @@
 from django.db.models import Max
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import AuditLog, naira, record
+from accounts.models import AuditLog, Feature, naira, record
+from accounts.permissions import NotRestricted, requires
 from accounts.utils import get_business
 
 from .models import Accessory, CableSize, CableType, record_price
@@ -56,7 +58,9 @@ class ItemHistoryMixin:
 
     @action(detail=True, methods=["get"])
     def history(self, request, pk=None):
-        return Response(ItemHistorySerializer(item_history(self.get_object())).data)
+        # Context matters: the cost series is hidden from members without `view_costs`, and the
+        # gate fails closed when it cannot see who is asking.
+        return Response(ItemHistorySerializer(item_history(self.get_object()), context={"request": request}).data)
 
 
 class BusinessCatalogueMixin:
@@ -71,6 +75,13 @@ class BusinessCatalogueMixin:
 
 
 class CableTypeViewSet(BusinessCatalogueMixin, viewsets.ModelViewSet):
+    # Everyone who sells must read the catalogue; only some may reprice it (PRD P6-F6).
+    permission_classes = [
+        IsAuthenticated,
+        NotRestricted,
+        requires(Feature.CATALOGUE, write_feature=Feature.CATALOGUE_EDIT),
+    ]
+
     serializer_class = CableTypeSerializer
 
     def get_queryset(self):
@@ -97,6 +108,12 @@ class CableSizeViewSet(
     mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
+    # Everyone who sells must read the catalogue; only some may reprice it (PRD P6-F6).
+    permission_classes = [
+        IsAuthenticated,
+        NotRestricted,
+        requires(Feature.CATALOGUE, write_feature=Feature.CATALOGUE_EDIT),
+    ]
     serializer_class = CableSizeSerializer
 
     def get_queryset(self):
@@ -117,6 +134,13 @@ class CableSizeViewSet(
 
 
 class AccessoryViewSet(ItemHistoryMixin, BusinessCatalogueMixin, viewsets.ModelViewSet):
+    # Everyone who sells must read the catalogue; only some may reprice it (PRD P6-F6).
+    permission_classes = [
+        IsAuthenticated,
+        NotRestricted,
+        requires(Feature.CATALOGUE, write_feature=Feature.CATALOGUE_EDIT),
+    ]
+
     serializer_class = AccessorySerializer
 
     def get_queryset(self):
@@ -146,6 +170,8 @@ MOVEMENT_LIMIT = 6
 
 
 class PriceMovementsView(APIView):
+    permission_classes = [IsAuthenticated, NotRestricted, requires(Feature.CATALOGUE)]
+
     """Catalogue items whose cost has moved most recently, newest first.
 
     One request rather than a history call per item: the dashboard would otherwise make a
@@ -199,4 +225,4 @@ class PriceMovementsView(APIView):
                     "history": item_history(row),
                 }
             )
-        return Response(PriceMovementSerializer(movements, many=True).data)
+        return Response(PriceMovementSerializer(movements, many=True, context={"request": request}).data)

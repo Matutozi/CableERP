@@ -1,6 +1,13 @@
-from django.urls import path
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
 
 from . import views
+
+router = DefaultRouter()
+router.register("staff", views.StaffViewSet, basename="staff")
+router.register("invitations", views.InvitationViewSet, basename="invitation")
+router.register("roles", views.RoleTemplateViewSet, basename="role-template")
+router.register("stores", views.StoreViewSet, basename="store")
 
 urlpatterns = [
     path("auth/me/", views.MeView.as_view(), name="auth-me"),
@@ -12,4 +19,9 @@ urlpatterns = [
     path("profile/logo/", views.ProfileLogoView.as_view(), name="profile-logo"),
     path("profile/brand-logo/", views.ProfileBrandLogoView.as_view(), name="profile-brand-logo"),
     path("activity/", views.ActivityView.as_view(), name="activity"),
+    path("features/", views.FeatureListView.as_view(), name="features"),
+    path("current-store/", views.CurrentStoreView.as_view(), name="current-store"),
+    # Reachable without a session: the invited person has no account yet.
+    path("auth/accept-invite/", views.AcceptInvitationView.as_view(), name="auth-accept-invite"),
+    path("", include(router.urls)),
 ]

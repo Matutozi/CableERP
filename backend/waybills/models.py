@@ -21,6 +21,11 @@ from quotes.models import GENERIC_TYPE_NAMES, Quote, QuoteLineItem
 
 class Waybill(models.Model):
     business = models.ForeignKey(BusinessProfile, on_delete=models.CASCADE, related_name="waybills")
+    # Which branch this belongs to. Nullable: records predating stores have no branch to claim
+    # them, and a null is visible business-wide rather than hidden (SYSTEM_DESIGN.md Q32).
+    store = models.ForeignKey(
+        "accounts.Store", on_delete=models.PROTECT, null=True, blank=True, related_name="%(class)ss"
+    )
     # Kept if the quote is deleted: the goods were still dispatched.
     quote = models.ForeignKey(Quote, on_delete=models.SET_NULL, null=True, blank=True, related_name="waybills")
     reference_number = models.CharField(max_length=32, editable=False)

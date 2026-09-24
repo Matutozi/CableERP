@@ -61,17 +61,26 @@ export default function WaybillList() {
         <>
           <div className="panel flush waybill-rows">
             {waybills.map((waybill) => (
-              <Link key={waybill.id} to={`/quotes/waybills/${waybill.id}`} className="waybill-row">
-                <span className="waybill-main">
-                  <span className="waybill-customer">{waybill.customer_name}</span>
-                  <span className="waybill-sub">
-                    {formatDate(waybill.date)} · {waybill.item_count}{" "}
-                    {waybill.item_count === 1 ? "item" : "items"}
-                    {waybill.quote_reference && ` · from ${waybill.quote_reference}`}
+              <div key={waybill.id} className="waybill-row-group">
+                <Link to={`/quotes/waybills/${waybill.id}`} className="waybill-row">
+                  <span className="waybill-main">
+                    <span className="waybill-customer">{waybill.customer_name}</span>
+                    <span className="waybill-sub">
+                      {formatDate(waybill.date)} · {waybill.item_count}{" "}
+                      {waybill.item_count === 1 ? "item" : "items"}
+                      {waybill.quote_reference && ` · from ${waybill.quote_reference}`}
+                    </span>
                   </span>
-                </span>
-                <span className="waybill-ref tabular">{waybill.reference_number}</span>
-              </Link>
+                  <span className="waybill-ref tabular">{waybill.reference_number}</span>
+                </Link>
+                <Link
+                  to={`/quotes/waybills/${waybill.id}/preview`}
+                  className="btn btn-ghost row-preview"
+                  aria-label={`Preview waybill ${waybill.reference_number}`}
+                >
+                  Preview
+                </Link>
+              </div>
             ))}
           </div>
           {nextPage && (
