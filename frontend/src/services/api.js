@@ -73,6 +73,24 @@ export const api = {
   logout: () => post("/auth/logout/"),
   logoutEverywhere: () => post("/auth/logout-everywhere/"),
 
+  // Staff, invitations, roles and branches — the membership spine.
+  listStaff: () => get("/staff/"),
+  updateMember: (id, data) => patch(`/staff/${id}/`, data),
+  listInvitations: () => get("/invitations/"),
+  createInvitation: (data) => post("/invitations/", data),
+  cancelInvitation: (id) => del(`/invitations/${id}/`),
+  acceptInvitation: (data) => post("/auth/accept-invite/", data),
+  listFeatures: () => get("/features/"),
+  listRoles: () => get("/roles/"),
+  createRole: (data) => post("/roles/", data),
+  updateRole: (id, data) => patch(`/roles/${id}/`, data),
+  deleteRole: (id) => del(`/roles/${id}/`),
+  listStores: () => get("/stores/"),
+  currentStore: () => get("/current-store/"),
+  setCurrentStore: (store) => put("/current-store/", { store }),
+  createStore: (data) => post("/stores/", data),
+  updateStore: (id, data) => patch(`/stores/${id}/`, data),
+
   getProfile: () => get("/profile/"),
   updateProfile: (data) => put("/profile/", data),
   uploadLogo: (file) => {

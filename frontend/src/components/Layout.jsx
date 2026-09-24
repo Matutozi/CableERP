@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import StorePicker from "./StorePicker.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import Icon from "./Icon.jsx";
 
@@ -7,6 +8,7 @@ const NAV = [
   { to: "/", label: "Dashboard", icon: "dashboard", end: true },
   { to: "/quotes", label: "Quotes", icon: "quotes" },
   { to: "/catalogue", label: "Catalogue", icon: "catalogue" },
+  { to: "/staff", label: "Staff", icon: "settings" },
   { to: "/settings", label: "Settings", icon: "settings" },
 ];
 
@@ -54,6 +56,7 @@ function SidebarContent({ user, onNavigate, onLogout }) {
           <div className="user-name">{user.full_name || user.username}</div>
           <div className="user-sub">@{user.username}</div>
         </div>
+        <StorePicker />
         <button type="button" className="icon-btn" onClick={onLogout} aria-label="Log out" title="Log out">
           <Icon name="logout" />
         </button>
