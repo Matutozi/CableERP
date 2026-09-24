@@ -4,8 +4,8 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 
 from accounts.models import AuditLog, Feature, naira, record
-from accounts.permissions import requires
-from accounts.utils import default_store, get_business, scope_to_stores
+from accounts.permissions import NotRestricted, requires
+from accounts.utils import default_store, get_business, scope_to_current_store, scope_to_stores
 
 from . import costing
 from .models import Purchase
@@ -21,7 +21,7 @@ class PurchasePagination(PageNumberPagination):
 class PurchaseViewSet(viewsets.ModelViewSet):
     # The purchase ledger is every supplier and every price paid. Unlike the catalogue there is no
     # part of it a salesperson needs, so the gate is the whole endpoint rather than its fields.
-    permission_classes = [IsAuthenticated, requires(Feature.PURCHASES)]
+    permission_classes = [IsAuthenticated, NotRestricted, requires(Feature.PURCHASES)]
     """Deliveries, and the cost they leave behind on the catalogue.
 
     Every write recomputes the cached cost of the rows it touches. That work is small — one
@@ -37,7 +37,7 @@ class PurchaseViewSet(viewsets.ModelViewSet):
             .prefetch_related("items__cable_size__cable_type", "items__accessory")
             .select_related("created_by", "store")
         )
-        return scope_to_stores(queryset, self.request)
+        return scope_to_current_store(scope_to_stores(queryset, self.request), self.request)
 
     def get_serializer_class(self):
         return PurchaseListSerializer if self.action == "list" else PurchaseSerializer

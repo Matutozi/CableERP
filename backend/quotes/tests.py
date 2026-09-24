@@ -9,7 +9,7 @@ from django.test import SimpleTestCase
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from accounts.models import AuditLog, BusinessProfile, Membership, provision_business
+from accounts.models import AuditLog, BusinessProfile, Feature, Membership, provision_business
 from catalogue.models import Accessory, CableSize, CableType
 
 from .models import Quote
@@ -730,3 +730,95 @@ class QuotePaymentOverrideTests(APITestCase):
 
         quote.refresh_from_db()
         self.assertEqual(quote.payment_account_number, "9999888877")
+
+
+class DiscountPermissionTests(APITestCase):
+    """Selling below the catalogue price is a permission, not a fixed policy (Q24)."""
+
+    def setUp(self):
+        self.owner, self.business = make_business("ada")
+        provision_business(self.business, self.owner)
+        cable_type = CableType.objects.create(business=self.business, name="Singles", unit="coil")
+        self.size = CableSize.objects.create(cable_type=cable_type, size_label="1.5mm", default_price=Decimal("33000"))
+        self.seller = User.objects.create_user("emeka", password="a-strong-pass-123")
+        self.membership = Membership.create_from_template(
+            self.business, self.seller, self.business.role_templates.get(name="Sales"), all_stores=True
+        )
+
+    def _quote(self, price, **extra):
+        return self.client.post(
+            "/api/quotes/",
+            {
+                "customer_name": "Musa",
+                "staff_name": "Emeka",
+                "line_items": [
+                    {
+                        "kind": "cable",
+                        "cable_size": self.size.id,
+                        "cable_type_name": "Singles",
+                        "size_label": "1.5mm",
+                        "unit": "coil",
+                        "unit_price": price,
+                        "colours": [{"colour": "", "quantity": 2}],
+                    }
+                ],
+                **extra,
+            },
+            format="json",
+        )
+
+    def test_without_the_permission_the_catalogue_price_is_the_floor(self):
+        self.client.force_authenticate(self.seller)
+        response = self._quote("25000")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("cannot price below the catalogue", str(response.data))
+
+    def test_the_refusal_says_what_to_do_about_it(self):
+        self.client.force_authenticate(self.seller)
+        self.assertIn("approve a discount", str(self._quote("25000").data))
+
+    def test_selling_at_or_above_the_catalogue_price_is_fine(self):
+        self.client.force_authenticate(self.seller)
+        self.assertEqual(self._quote("33000").status_code, 201)
+        self.assertEqual(self._quote("40000").status_code, 201)
+
+    def test_granting_the_permission_allows_it(self):
+        """The whole point: an owner decides per person, no policy menu."""
+        self.membership.set_permissions([*self.membership.permissions, Feature.DISCOUNT])
+        self.membership.save()
+        self.client.force_authenticate(self.seller)
+        self.assertEqual(self._quote("25000").status_code, 201)
+
+    def test_a_discount_by_someone_who_cannot_set_prices_is_recorded(self):
+        self.membership.set_permissions([*self.membership.permissions, Feature.DISCOUNT])
+        self.membership.save()
+        self.client.force_authenticate(self.seller)
+        self._quote("25000")
+
+        entry = self.business.audit_log.filter(action=AuditLog.Action.LINE_DISCOUNTED).get()
+        self.assertIn("25000", entry.summary)
+        self.assertEqual(entry.user, self.seller)
+
+    def test_an_owner_s_discount_is_not_logged(self):
+        """They can lower the list price outright, so logging them would bury the real entries."""
+        self.client.force_authenticate(self.owner)
+        self._quote("25000")
+        self.assertFalse(self.business.audit_log.filter(action=AuditLog.Action.LINE_DISCOUNTED).exists())
+
+    def test_an_owner_can_always_discount(self):
+        self.client.force_authenticate(self.owner)
+        self.assertEqual(self._quote("1000").status_code, 201)
+
+    def test_a_free_typed_line_has_no_catalogue_price_to_enforce(self):
+        """A known gap: refusing to quote anything not already catalogued is not how sellers work."""
+        self.client.force_authenticate(self.seller)
+        response = self.client.post(
+            "/api/quotes/",
+            {
+                "customer_name": "Musa",
+                "staff_name": "Emeka",
+                "line_items": [plain_line("Odd item", "1", 1)],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)

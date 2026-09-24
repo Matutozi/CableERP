@@ -110,7 +110,15 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["accounts.authentication.SessionAuthentication"],
-    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    # NotRestricted is a default rather than per-view: a restricted business must be read-only
+    # everywhere, and a gate each view has to remember is a gate some view will forget
+    # (SYSTEM_DESIGN.md Q34). Views that set permission_classes replace this list, so the ones that
+    # do — login, register, accept-invite — are deliberately exempt; a restricted business's owner
+    # must still be able to sign in and see their records.
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+        "accounts.permissions.NotRestricted",
+    ],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     # Throttles use Django's cache. The default local-memory cache counts per process,
     # so give the deployment a shared cache (Redis) once it runs more than one worker.

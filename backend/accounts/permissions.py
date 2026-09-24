@@ -62,6 +62,29 @@ def requires(feature, write_feature=None):
     return _RequiresFeature
 
 
+class NotRestricted(BasePermission):
+    """Refuse writes from a business an operator has restricted (SYSTEM_DESIGN.md Q34).
+
+    Reads pass through, so the business keeps its catalogue, its quotes and its PDFs. Only adding
+    to them stops.
+    """
+
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return True
+        business = getattr(getattr(request, "user", None), "business_profile", None)
+        membership = get_membership(request)
+        if membership is not None:
+            business = membership.business
+        if business is None or not business.is_restricted:
+            return True
+        self.message = business.restricted_reason or (
+            "This account is read-only. Your records are still here and still downloadable. "
+            "Contact us to reactivate it."
+        )
+        return False
+
+
 class HidesRestrictedFields:
     """Serializer mixin that removes fields the caller may not see.
 

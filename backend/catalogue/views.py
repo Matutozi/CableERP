@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import AuditLog, Feature, naira, record
-from accounts.permissions import requires
+from accounts.permissions import NotRestricted, requires
 from accounts.utils import get_business
 
 from .models import Accessory, CableSize, CableType, record_price
@@ -76,7 +76,11 @@ class BusinessCatalogueMixin:
 
 class CableTypeViewSet(BusinessCatalogueMixin, viewsets.ModelViewSet):
     # Everyone who sells must read the catalogue; only some may reprice it (PRD P6-F6).
-    permission_classes = [IsAuthenticated, requires(Feature.CATALOGUE, write_feature=Feature.CATALOGUE_EDIT)]
+    permission_classes = [
+        IsAuthenticated,
+        NotRestricted,
+        requires(Feature.CATALOGUE, write_feature=Feature.CATALOGUE_EDIT),
+    ]
 
     serializer_class = CableTypeSerializer
 
@@ -105,7 +109,11 @@ class CableSizeViewSet(
     viewsets.GenericViewSet,
 ):
     # Everyone who sells must read the catalogue; only some may reprice it (PRD P6-F6).
-    permission_classes = [IsAuthenticated, requires(Feature.CATALOGUE, write_feature=Feature.CATALOGUE_EDIT)]
+    permission_classes = [
+        IsAuthenticated,
+        NotRestricted,
+        requires(Feature.CATALOGUE, write_feature=Feature.CATALOGUE_EDIT),
+    ]
     serializer_class = CableSizeSerializer
 
     def get_queryset(self):
@@ -127,7 +135,11 @@ class CableSizeViewSet(
 
 class AccessoryViewSet(ItemHistoryMixin, BusinessCatalogueMixin, viewsets.ModelViewSet):
     # Everyone who sells must read the catalogue; only some may reprice it (PRD P6-F6).
-    permission_classes = [IsAuthenticated, requires(Feature.CATALOGUE, write_feature=Feature.CATALOGUE_EDIT)]
+    permission_classes = [
+        IsAuthenticated,
+        NotRestricted,
+        requires(Feature.CATALOGUE, write_feature=Feature.CATALOGUE_EDIT),
+    ]
 
     serializer_class = AccessorySerializer
 
@@ -158,7 +170,7 @@ MOVEMENT_LIMIT = 6
 
 
 class PriceMovementsView(APIView):
-    permission_classes = [IsAuthenticated, requires(Feature.CATALOGUE)]
+    permission_classes = [IsAuthenticated, NotRestricted, requires(Feature.CATALOGUE)]
 
     """Catalogue items whose cost has moved most recently, newest first.
 

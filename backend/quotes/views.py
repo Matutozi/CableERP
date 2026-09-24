@@ -10,8 +10,8 @@ from rest_framework.response import Response
 from rest_framework.throttling import UserRateThrottle
 
 from accounts.models import AuditLog, BusinessProfile, Feature, naira, record
-from accounts.permissions import requires
-from accounts.utils import default_store, get_business, scope_to_stores
+from accounts.permissions import NotRestricted, requires
+from accounts.utils import default_store, get_business, scope_to_current_store, scope_to_stores
 
 from .models import Quote
 from .pdf import quote_pdf_bytes
@@ -31,7 +31,7 @@ class PdfRateThrottle(UserRateThrottle):
 
 
 class QuoteViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated, requires(Feature.QUOTES)]
+    permission_classes = [IsAuthenticated, NotRestricted, requires(Feature.QUOTES)]
     pagination_class = QuotePagination
 
     def get_queryset(self):
@@ -40,7 +40,7 @@ class QuoteViewSet(viewsets.ModelViewSet):
             .select_related("business", "store")
             .prefetch_related("line_items__colours")
         )
-        queryset = scope_to_stores(queryset, self.request)
+        queryset = scope_to_current_store(scope_to_stores(queryset, self.request), self.request)
         search = self.request.query_params.get("search", "").strip()
         if search:
             queryset = queryset.filter(Q(customer_name__icontains=search) | Q(reference_number__icontains=search))

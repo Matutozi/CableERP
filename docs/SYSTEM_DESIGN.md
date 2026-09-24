@@ -288,22 +288,27 @@ working keys. Resending therefore issues a new token rather than re-sending the 
 **Breaks if changed:** A nullable `Membership.user` makes every access check carry a "and the user
 exists" clause, and the unique constraint stops protecting against duplicate memberships.
 
-### Q24. Why is discounting a per-business policy instead of one rule?
-**Where:** `accounts/models.py:BusinessProfile.discount_policy` *(being built)*, enforced in
-`quotes/serializers.py`
-**Decision:** Four modes — `free` (default), `logged`, `capped` (with `max_discount_percent`),
-`none` — chosen by the business owner. The policy binds only members without `CATALOGUE_EDIT`.
+### Q24. Why is discounting a permission rather than a per-business policy?
+**Where:** `accounts/models.py:Feature.DISCOUNT`, enforced in `quotes/serializers.py`
+**Decision:** Selling below the catalogue price is a grantable permission like any other. A member
+who holds it may price a line freely; one who does not is held to the catalogue price. It is
+granted per person, and role templates group it however a business likes.
 **Reasoning:** `unit_price` is per-line and client-supplied, so hiding cost stops a salesperson
-knowing the floor but not selling beneath it. That is the actual fraud route, and the right control
-for it differs by business: a trader with two family members on the counter wants nothing in the
-way, a distributor with salaried staff wants a hard cap. Picking one would make the product wrong
-for the other half of the market. `free` is the default because it is the current behaviour, so the
-migration changes nothing for anyone already trading — a stricter default would start rejecting
-quotes that worked yesterday. Owners and managers are exempt because they can edit the catalogue
-price itself; enforcing a discount cap on someone who can raise the list price is theatre.
-**Breaks if changed:** Making the policy global forces every business onto one risk appetite.
-Defaulting to anything but `free` silently rejects legitimate quotes on the day of the upgrade,
-with no one having asked for the change.
+knowing the floor but not selling beneath it. That is the actual fraud route.
+The first design was a four-mode policy field on the business — free, logged, capped, none. That was
+wrong: it invented a **second configuration mechanism** beside the one the product already has, and
+it hardcoded a fixed set of postures every business had to choose between. Permissions are already
+stored per member (Q19) and grouped by templates the business defines (Q26), so a trader who trusts
+everyone grants it to everyone, a distributor grants it to nobody below manager, and neither has to
+pick from a menu somebody else wrote. One mechanism, not two.
+**Logged, but only where the log means something.** A below-catalogue line is recorded when the
+person lacks `catalogue_edit`, and not when they hold it — someone who can change the list price
+outright discounts by definition, so logging them is noise that would bury the entries that matter.
+A percentage cap was considered and dropped: it is a third mechanism again, and nobody has asked for
+one. A permission plus a record answers the question that was actually being asked.
+**Breaks if changed:** Resolving it from a business-level field means every business on the platform
+picks from the same fixed postures, and the per-person question — *may **this** cashier discount?* —
+cannot be expressed at all.
 
 ### Q27. Why is `factory_price` a separate mixin instead of a field on `CostedItem`?
 **Where:** `catalogue/models.py:FactoryPriced`, mixed into `CableSize` and `Accessory`
@@ -411,6 +416,46 @@ unique per business per day, and adding a branch segment would change that rule 
 quote. Scoping works without it.
 **Breaks if changed:** Filtering per view instead of through the helper means the next viewset
 forgets, and forgetting is invisible — the data simply looks complete to whoever is looking.
+
+### Q33. Why is the store selector a view filter rather than an access control?
+**Where:** `accounts/utils.py:current_store`, applied after `scope_to_stores`
+**Decision:** A member who can see several branches may pick one to work in. The choice narrows
+what they see and decides which branch new records are filed under. It is stored in the session,
+and it can only ever select from the branches `Membership.visible_stores()` already allows.
+**Reasoning:** Two different questions get confused here, and keeping them apart is the whole point.
+*What may this person see?* is access, answered by the membership and enforced in `scope_to_stores`.
+*What do they want to look at right now?* is a preference, answered by the selector. If the selector
+were the access control, clearing it — or a stale session, or a crafted request — would widen what
+someone can reach. Layering it **after** the security filter means the worst a bad value can do is
+show too little.
+Storing it in the session rather than the membership row keeps it per-device: an owner checking Aba
+from their phone should not change what their laptop shows.
+A stale or out-of-scope id falls through to "all my branches" rather than erroring, for the same
+reason the business selector does (Q20) — a member whose access changed should find the app working,
+not broken.
+**Breaks if changed:** Using the selector to decide access means an unset session value is
+indistinguishable from permission to see everything, and the store scope stops being enforceable.
+
+### Q34. What can a restricted business still do, and why is it not simply locked out?
+**Where:** `accounts/models.py:BusinessProfile.status`, `accounts/permissions.py:NotRestricted`
+**Decision:** An operator sets a business to `restricted` in the Django admin. Reads continue,
+existing PDFs still download, and every write is refused with a message naming the reason. Only an
+operator can lift it; nothing in the API can.
+**Reasoning:** This is the lever for a trial that has not been paid for, so it has to be firm. But a
+hard lockout is the wrong shape twice over. Practically, the business's own records are theirs — a
+customer behind on payment asking for last month's quote should get it, and holding data hostage is
+a bad look and, in some jurisdictions, worse than that. Commercially, someone who can still see
+everything they built and simply cannot add to it has a far stronger reason to pay than someone
+staring at a login error, who has already lost the thread.
+Read-only rather than a `403` everywhere also means the app degrades honestly: the seller sees their
+catalogue and their quotes, and finds out why the moment they try to save.
+It reuses the shape of the member gates (Q29) rather than inventing one: a DRF permission class over
+`SAFE_METHODS`, sitting alongside `requires()`.
+`status` on the profile rather than a `Subscription` field because there is no subscription yet.
+When billing arrives it writes to this field instead of replacing it, which is a widening rather
+than a migration.
+**Breaks if changed:** Refusing reads too means a business that pays a week late cannot retrieve
+records it made while paying, and the restriction becomes a reason to churn rather than to settle.
 
 ## Part 4 — Configuration and safety
 

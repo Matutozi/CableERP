@@ -311,3 +311,211 @@ class StoreScopeLeakTests(APITestCase):
             if response.status_code == 200 and "QT-ABA" in response.content.decode():
                 offenders.append(url)
         self.assertEqual(offenders, [], f"another branch's quote appeared at: {offenders}")
+
+
+class StoreSelectorTests(APITestCase):
+    """Choosing a branch narrows the view; it must never widen access (SYSTEM_DESIGN.md Q33)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from accounts.models import Store
+
+        owner = User.objects.create_user("ada", password=PASSWORD)
+        cls.business = BusinessProfile.objects.create(user=owner, business_name="Ada Cables", store_limit=3)
+        provision_business(cls.business, owner)
+        cls.owner = owner
+        cls.ikeja = Store.objects.create(business=cls.business, name="Ikeja", code="IKJ")
+        cls.aba = Store.objects.create(business=cls.business, name="Aba", code="ABA")
+
+        for reference, store in (("QT-IKJ", cls.ikeja), ("QT-ABA", cls.aba), ("QT-OLD", None)):
+            Quote.objects.create(
+                business=cls.business,
+                store=store,
+                customer_name=f"Customer {reference}",
+                staff_name="Ada",
+                reference_number=reference,
+            )
+
+        # Sees Ikeja only. Used to prove the selector cannot reach past the membership.
+        scoped_user = User.objects.create_user("emeka", password=PASSWORD)
+        cls.scoped = Membership.create_from_template(
+            cls.business, scoped_user, cls.business.role_templates.get(name="Owner"), all_stores=False
+        )
+        cls.scoped.stores.set([cls.ikeja])
+        cls.scoped_user = scoped_user
+
+    def _references(self):
+        return {q["reference_number"] for q in self.client.get("/api/quotes/?page_size=50").data["results"]}
+
+    def test_an_owner_sees_every_branch_by_default(self):
+        self.client.force_authenticate(self.owner)
+        self.assertEqual(self._references(), {"QT-IKJ", "QT-ABA", "QT-OLD"})
+
+    def test_choosing_a_branch_narrows_the_view(self):
+        self.client.force_authenticate(self.owner)
+        response = self.client.put("/api/current-store/", {"store": self.ikeja.id}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["current"]["code"], "IKJ")
+        self.assertEqual(self._references(), {"QT-IKJ", "QT-OLD"})
+
+    def test_clearing_the_choice_restores_every_branch(self):
+        self.client.force_authenticate(self.owner)
+        self.client.put("/api/current-store/", {"store": self.ikeja.id}, format="json")
+        self.client.put("/api/current-store/", {"store": None}, format="json")
+        self.assertEqual(self._references(), {"QT-IKJ", "QT-ABA", "QT-OLD"})
+
+    def test_a_branch_outside_the_membership_is_refused(self):
+        """The selector is a preference layered on access, so it cannot reach past it."""
+        self.client.force_authenticate(self.scoped_user)
+        response = self.client.put("/api/current-store/", {"store": self.aba.id}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self._references(), {"QT-IKJ", "QT-OLD"})
+
+    def test_a_branch_from_another_business_is_refused(self):
+        from accounts.models import Store
+
+        other_owner = User.objects.create_user("bola", password=PASSWORD)
+        other = BusinessProfile.objects.create(user=other_owner, business_name="Bola Cables")
+        theirs = Store.objects.create(business=other, name="Theirs", code="THR")
+
+        self.client.force_authenticate(self.owner)
+        self.assertEqual(self.client.put("/api/current-store/", {"store": theirs.id}, format="json").status_code, 400)
+
+    def test_a_stale_selection_falls_through_to_everything(self):
+        """A member whose branches changed should find the app working, not broken."""
+        self.client.force_authenticate(self.owner)
+        session = self.client.session
+        session["current_store_id"] = 999999
+        session.save()
+        self.assertEqual(self._references(), {"QT-IKJ", "QT-ABA", "QT-OLD"})
+
+    def test_the_picker_is_hidden_when_there_is_nothing_to_choose(self):
+        self.client.force_authenticate(self.scoped_user)
+        response = self.client.get("/api/current-store/")
+        self.assertIs(response.data["selectable"], False)
+        self.assertEqual([s["code"] for s in response.data["available"]], ["IKJ"])
+
+    def test_a_new_quote_is_filed_under_the_chosen_branch(self):
+        self.client.force_authenticate(self.owner)
+        self.client.put("/api/current-store/", {"store": self.aba.id}, format="json")
+        response = self.client.post(
+            "/api/quotes/",
+            {
+                "customer_name": "Musa",
+                "staff_name": "Ada",
+                "line_items": [
+                    {
+                        "cable_type_name": "Singles",
+                        "size_label": "1.5mm",
+                        "unit": "coil",
+                        "unit_price": "1000",
+                        "colours": [{"colour": "", "quantity": 2}],
+                    }
+                ],
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Quote.objects.get(pk=response.data["id"]).store, self.aba)
+
+
+class RestrictedBusinessTests(APITestCase):
+    """A business an operator has switched off: read-only, not locked out (Q34)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        owner = User.objects.create_user("ada", password=PASSWORD)
+        cls.business = BusinessProfile.objects.create(user=owner, business_name="Ada Cables")
+        provision_business(cls.business, owner)
+        cls.owner = owner
+
+        cable_type = CableType.objects.create(business=cls.business, name="Singles", unit="coil")
+        cls.size = CableSize.objects.create(cable_type=cable_type, size_label="1.5mm", default_price=Decimal("33000"))
+        cls.quote = Quote.objects.create(
+            business=cls.business, customer_name="Musa", staff_name="Ada", reference_number="QT-1"
+        )
+
+    def setUp(self):
+        self.client.force_authenticate(self.owner)
+        self.business.status = BusinessProfile.Status.ACTIVE
+        self.business.restricted_reason = ""
+        self.business.save()
+
+    def _restrict(self, reason=""):
+        self.business.status = BusinessProfile.Status.RESTRICTED
+        self.business.restricted_reason = reason
+        self.business.save()
+
+    def test_an_active_business_can_write(self):
+        response = self.client.patch(f"/api/sizes/{self.size.id}/", {"default_price": "34000"}, format="json")
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_restricted_business_can_still_read_its_records(self):
+        """Their data is theirs. Holding it hostage is both a bad look and a reason to churn."""
+        self._restrict()
+        self.assertEqual(self.client.get("/api/quotes/").status_code, 200)
+        self.assertEqual(self.client.get("/api/cable-types/").status_code, 200)
+        self.assertEqual(self.client.get("/api/profile/").status_code, 200)
+
+    def test_a_restricted_business_can_still_download_a_pdf(self):
+        self._restrict()
+        self.assertEqual(self.client.get(f"/api/quotes/{self.quote.id}/pdf/").status_code, 200)
+
+    def test_a_restricted_business_cannot_write(self):
+        self._restrict()
+        self.assertEqual(
+            self.client.patch(f"/api/sizes/{self.size.id}/", {"default_price": "1"}, format="json").status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post("/api/quotes/", {"customer_name": "X", "staff_name": "Y"}, format="json").status_code,
+            403,
+        )
+
+    def test_the_refusal_explains_itself(self):
+        self._restrict("Trial ended — contact sales to continue.")
+        response = self.client.post("/api/quotes/", {}, format="json")
+        self.assertIn("Trial ended", str(response.data))
+
+    def test_there_is_a_sensible_message_when_no_reason_was_given(self):
+        self._restrict()
+        response = self.client.post("/api/quotes/", {}, format="json")
+        self.assertIn("read-only", str(response.data).lower())
+
+    def test_signing_in_still_works(self):
+        """Locking them out of the door would mean they cannot reach their own records."""
+        self._restrict()
+        self.client.force_authenticate(None)
+        response = self.client.post(
+            "/api/auth/login/",
+            {"username": "ada", "password": PASSWORD},
+            format="json",
+            REMOTE_ADDR="198.51.100.30",
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_lifting_the_restriction_restores_writing(self):
+        self._restrict()
+        self.business.status = BusinessProfile.Status.ACTIVE
+        self.business.save()
+        self.assertEqual(
+            self.client.patch(f"/api/sizes/{self.size.id}/", {"default_price": "35000"}, format="json").status_code,
+            200,
+        )
+
+    def test_the_api_cannot_lift_its_own_restriction(self):
+        """The lever is the operator's; a business that could switch itself back on has no lever."""
+        self._restrict()
+        self.client.patch("/api/profile/", {"status": "active"}, format="json")
+        self.business.refresh_from_db()
+        self.assertTrue(self.business.is_restricted)
+
+    def test_another_business_is_unaffected(self):
+        self._restrict()
+        other_owner = User.objects.create_user("bola", password=PASSWORD)
+        other = BusinessProfile.objects.create(user=other_owner, business_name="Bola Cables")
+        provision_business(other, other_owner)
+
+        self.client.force_authenticate(other_owner)
+        response = self.client.post("/api/stores/", {"name": "Main2", "code": "M2"}, format="json")
+        self.assertNotEqual(response.status_code, 403)

@@ -55,6 +55,24 @@ class BusinessProfile(models.Model):
         default=False,
         help_text="Show the manufacturer's direct price on quotes, so customers see what they save.",
     )
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        # Reads and PDFs continue; writes are refused. Operator-set, and only an operator can lift
+        # it — see SYSTEM_DESIGN.md Q34.
+        RESTRICTED = "restricted", "Restricted — read-only"
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+        help_text="Restricted makes the business read-only. Their records stay readable and downloadable.",
+    )
+    restricted_reason = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Shown to the business when a write is refused, e.g. 'Trial ended — contact sales'.",
+    )
     # How many active stores this business may run. Set by a platform operator in the Django
     # admin, never through the API — see SYSTEM_DESIGN.md Q21. When plans arrive this becomes the
     # per-customer override of the plan's default rather than the only source.
@@ -76,6 +94,10 @@ class BusinessProfile(models.Model):
     @property
     def active_store_count(self):
         return self.stores.filter(is_active=True).count()
+
+    @property
+    def is_restricted(self):
+        return self.status == self.Status.RESTRICTED
 
     @property
     def is_over_store_limit(self):
@@ -128,6 +150,9 @@ class Feature(models.TextChoices):
     PURCHASES = "purchases", "Record purchases"
     VIEW_COSTS = "view_costs", "See cost and margin"
     QUOTES = "quotes", "Quotes"
+    # Selling below the catalogue price. Separate from `catalogue_edit` because the two are
+    # different trusts: one changes the list price for everybody, this bends it for one customer.
+    DISCOUNT = "discount", "Sell below the catalogue price"
     WAYBILLS = "waybills", "Waybills"
     BANK_DETAILS = "bank_details", "Change bank details"
     MANAGE_MEMBERS = "manage_members", "Invite and remove members"
@@ -424,6 +449,9 @@ class AuditLog(models.Model):
         # A quote sent with a different account than the profile's. Logged because the permission
         # prevents the obvious abuse and this catches the rest (SYSTEM_DESIGN.md Q31).
         QUOTE_PAYMENT_OVERRIDE = "quote_payment_override", "Quote payment account overridden"
+        MEMBER_INVITED = "member_invited", "Staff member invited"
+        MEMBER_CHANGED = "member_changed", "Staff access changed"
+        LINE_DISCOUNTED = "line_discounted", "Quote line sold below the catalogue price"
         QUOTE_CREATED = "quote_created", "Quote created"
         QUOTE_UPDATED = "quote_updated", "Quote edited"
         QUOTE_SENT = "quote_sent", "Quote sent"

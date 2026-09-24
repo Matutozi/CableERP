@@ -6,8 +6,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.models import AuditLog, Feature, record
-from accounts.permissions import requires
-from accounts.utils import default_store, get_business, scope_to_stores
+from accounts.permissions import NotRestricted, requires
+from accounts.utils import default_store, get_business, scope_to_current_store, scope_to_stores
 from quotes.views import PdfRateThrottle
 
 from .models import Waybill
@@ -22,7 +22,7 @@ class WaybillPagination(PageNumberPagination):
 
 
 class WaybillViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated, requires(Feature.WAYBILLS)]
+    permission_classes = [IsAuthenticated, NotRestricted, requires(Feature.WAYBILLS)]
     pagination_class = WaybillPagination
 
     def get_queryset(self):
@@ -31,7 +31,7 @@ class WaybillViewSet(viewsets.ModelViewSet):
             .select_related("business", "quote", "store")
             .prefetch_related("items__colours")
         )
-        queryset = scope_to_stores(queryset, self.request)
+        queryset = scope_to_current_store(scope_to_stores(queryset, self.request), self.request)
         quote = self.request.query_params.get("quote")
         if quote and quote.isdigit():
             queryset = queryset.filter(quote_id=int(quote))

@@ -182,6 +182,68 @@ class QuoteSerializer(HidesRestrictedFields, serializers.ModelSerializer):
             "updated_at",
         ]
 
+    def _catalogue_price(self, line):
+        """What the catalogue says this line should cost, or None for a free-typed item.
+
+        A line typed by hand has no catalogue entry to compare against, so nothing is enforced on
+        it. That is a real gap rather than an oversight: the alternative is refusing to quote
+        anything not already in the catalogue, which is how sellers actually work at a counter.
+        """
+        row = line.get("cable_size") or line.get("accessory")
+        return getattr(row, "default_price", None)
+
+    def validate(self, attrs):
+        """Hold members without `discount` to the catalogue price (SYSTEM_DESIGN.md Q24).
+
+        `unit_price` is client-supplied, so hiding cost stops a salesperson knowing the floor but
+        not selling beneath it. This is the check that does.
+        """
+        attrs = super().validate(attrs)
+        request = self.context.get("request")
+        if member_can(request, Feature.DISCOUNT):
+            return attrs
+
+        below = []
+        for index, line in enumerate(attrs.get("line_items") or [], start=1):
+            catalogue_price = self._catalogue_price(line)
+            if catalogue_price is not None and line.get("unit_price") is not None:
+                if line["unit_price"] < catalogue_price:
+                    below.append(f"line {index} at {line['unit_price']} against {catalogue_price}")
+        if below:
+            raise serializers.ValidationError(
+                {
+                    "line_items": (
+                        "You cannot price below the catalogue: "
+                        + "; ".join(below)
+                        + ". Ask someone who can approve a discount."
+                    )
+                }
+            )
+        return attrs
+
+    def _log_discounts(self, quote):
+        """Record below-catalogue lines by people who cannot set the list price.
+
+        Not logged for anyone holding `catalogue_edit`: they could lower the catalogue price
+        outright, so recording their discounts would bury the entries that matter under noise.
+        """
+        request = self.context.get("request")
+        if member_can(request, Feature.CATALOGUE_EDIT):
+            return
+        for line in quote.line_items.select_related("cable_size", "accessory"):
+            row = line.cable_size or line.accessory
+            catalogue_price = getattr(row, "default_price", None)
+            if catalogue_price is None or line.unit_price >= catalogue_price:
+                continue
+            record(
+                quote.business,
+                getattr(request, "user", None),
+                AuditLog.Action.LINE_DISCOUNTED,
+                f"{line.description}: {line.unit_price} instead of {catalogue_price}",
+                reference=quote.reference_number,
+                store=quote.store,
+            )
+
     def _log_payment_override(self, quote, business):
         """Record a quote whose payment account differs from the business's own.
 
@@ -244,6 +306,7 @@ class QuoteSerializer(HidesRestrictedFields, serializers.ModelSerializer):
         snapshot_costs(quote)
         snapshot_factory_prices(quote)
         self._log_payment_override(quote, business)
+        self._log_discounts(quote)
         return quote
 
     @transaction.atomic
@@ -267,6 +330,7 @@ class QuoteSerializer(HidesRestrictedFields, serializers.ModelSerializer):
         snapshot_costs(instance)
         snapshot_factory_prices(instance)
         self._log_payment_override(instance, instance.business)
+        self._log_discounts(instance)
         return instance
 
     def _save_line_items(self, quote, items):

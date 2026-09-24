@@ -13,8 +13,10 @@ class StoreInline(admin.TabularInline):
 class BusinessProfileAdmin(admin.ModelAdmin):
     # store_limit is editable here and nowhere else: this admin is the operator's, and the API
     # exposes the field read-only (SYSTEM_DESIGN.md Q21).
-    list_display = ["business_name", "user", "phone_numbers", "vat_rate", "store_limit", "stores_in_use"]
-    list_editable = ["store_limit"]
+    list_display = ["business_name", "user", "status", "vat_rate", "store_limit", "stores_in_use"]
+    # The two operator levers, editable from the list so turning a trial off is one screen.
+    list_editable = ["status", "store_limit"]
+    list_filter = ["status"]
     search_fields = ["business_name", "user__username"]
     inlines = [StoreInline]
 

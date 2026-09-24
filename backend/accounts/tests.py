@@ -18,6 +18,7 @@ from catalogue.models import CableSize, CableType
 from .models import (
     DEFAULT_STORE_CODE,
     OWNER_TEMPLATE_NAME,
+    AuditLog,
     BusinessProfile,
     Feature,
     Invitation,
@@ -790,3 +791,247 @@ class FactoryPricePreferenceTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.business.refresh_from_db()
         self.assertTrue(self.business.show_factory_price)
+
+
+class StaffEndpointTests(APITestCase):
+    """The owner's view of their people, and the guards around changing their access."""
+
+    def setUp(self):
+        self.owner = User.objects.create_user("ada", password=PASSWORD)
+        self.business = BusinessProfile.objects.create(user=self.owner, business_name="Ada Cables", store_limit=3)
+        provision_business(self.business, self.owner)
+        self.ikeja = Store.objects.create(business=self.business, name="Ikeja", code="IKJ")
+        self.seller = User.objects.create_user("emeka", password=PASSWORD)
+        self.member = Membership.create_from_template(
+            self.business, self.seller, self.business.role_templates.get(name="Sales"), stores=[self.ikeja]
+        )
+        self.client.force_authenticate(self.owner)
+
+    def test_the_staff_list_shows_everyone_and_their_branches(self):
+        response = self.client.get("/api/staff/")
+        by_name = {row["username"]: row for row in response.data}
+
+        self.assertEqual(set(by_name), {"ada", "emeka"})
+        self.assertEqual(by_name["ada"]["store_names"], ["All stores"])
+        self.assertEqual(by_name["emeka"]["store_names"], ["Ikeja"])
+
+    def test_an_owner_can_retune_one_person_s_access(self):
+        response = self.client.patch(
+            f"/api/staff/{self.member.id}/",
+            {"permissions": [Feature.QUOTES, Feature.VIEW_COSTS]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.member.refresh_from_db()
+        self.assertTrue(self.member.has(Feature.VIEW_COSTS))
+
+    def test_a_change_is_recorded(self):
+        self.client.patch(f"/api/staff/{self.member.id}/", {"status": "suspended"}, format="json")
+        self.assertTrue(self.business.audit_log.filter(action=AuditLog.Action.MEMBER_CHANGED).exists())
+
+    def test_a_branch_from_another_business_cannot_be_assigned(self):
+        other_owner = User.objects.create_user("bola", password=PASSWORD)
+        other = BusinessProfile.objects.create(user=other_owner, business_name="Bola Cables")
+        theirs = Store.objects.create(business=other, name="Theirs", code="THR")
+
+        response = self.client.patch(f"/api/staff/{self.member.id}/", {"stores": [theirs.id]}, format="json")
+        self.assertEqual(response.status_code, 400)
+
+    def test_the_last_owner_cannot_be_suspended(self):
+        """Otherwise a business locks itself out of its own account."""
+        owner_membership = self.business.memberships.get(user=self.owner)
+        response = self.client.patch(f"/api/staff/{owner_membership.id}/", {"status": "suspended"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("only active owner", str(response.data).lower())
+
+    def test_the_last_owner_cannot_drop_member_management(self):
+        owner_membership = self.business.memberships.get(user=self.owner)
+        remaining = [p for p in owner_membership.permissions if p != Feature.MANAGE_MEMBERS]
+        response = self.client.patch(f"/api/staff/{owner_membership.id}/", {"permissions": remaining}, format="json")
+        self.assertEqual(response.status_code, 400)
+
+    def test_an_owner_may_step_back_once_another_owner_exists(self):
+        second = User.objects.create_user("chidi", password=PASSWORD)
+        Membership.create_from_template(self.business, second, self.business.role_templates.get(name="Owner"))
+
+        owner_membership = self.business.memberships.get(user=self.owner)
+        response = self.client.patch(f"/api/staff/{owner_membership.id}/", {"status": "suspended"}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+
+    def test_a_salesperson_cannot_see_or_change_the_staff_list(self):
+        self.client.force_authenticate(self.seller)
+        self.assertEqual(self.client.get("/api/staff/").status_code, 403)
+        self.assertEqual(
+            self.client.patch(f"/api/staff/{self.member.id}/", {"permissions": []}, format="json").status_code, 403
+        )
+
+    def test_staff_cannot_be_created_directly(self):
+        """People join by accepting an invitation, not by an owner conjuring an account."""
+        self.assertEqual(self.client.post("/api/staff/", {}, format="json").status_code, 405)
+
+
+class InvitationEndpointTests(APITestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user("ada", password=PASSWORD)
+        self.business = BusinessProfile.objects.create(user=self.owner, business_name="Ada Cables", store_limit=3)
+        provision_business(self.business, self.owner)
+        self.ikeja = Store.objects.create(business=self.business, name="Ikeja", code="IKJ")
+        self.sales_template = self.business.role_templates.get(name="Sales")
+        self.client.force_authenticate(self.owner)
+
+    def _invite(self, **extra):
+        return self.client.post(
+            "/api/invitations/",
+            {"email": "emeka@example.com", "role_template": self.sales_template.id, **extra},
+            format="json",
+        )
+
+    def test_inviting_returns_a_link_once(self):
+        response = self._invite(stores=[self.ikeja.id])
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(response.data["invite_url"].startswith("/invite/"))
+        self.assertEqual(response.data["status"], "pending")
+
+    def test_the_link_is_not_retrievable_afterwards(self):
+        self._invite()
+        listed = self.client.get("/api/invitations/").data
+        self.assertIsNone(listed[0]["invite_url"])
+
+    def test_an_invite_needs_somewhere_to_send_it(self):
+        response = self.client.post("/api/invitations/", {"role_template": self.sales_template.id}, format="json")
+        self.assertEqual(response.status_code, 400)
+
+    def test_accepting_creates_the_member_with_the_chosen_access(self):
+        raw = self._invite(stores=[self.ikeja.id]).data["invite_url"].removeprefix("/invite/")
+        self.client.force_authenticate(None)
+
+        response = self.client.post(
+            "/api/auth/accept-invite/",
+            {"token": raw, "username": "emeka", "password": "a-strong-pass-123", "full_name": "Emeka O"},
+            format="json",
+            REMOTE_ADDR="198.51.100.9",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+
+        membership = Membership.objects.get(user__username="emeka")
+        self.assertEqual(membership.business, self.business)
+        self.assertEqual(membership.role_label, "Sales")
+        self.assertEqual([s.code for s in membership.visible_stores()], ["IKJ"])
+        self.assertFalse(membership.has(Feature.VIEW_COSTS))
+
+    def test_a_used_link_stops_working(self):
+        raw = self._invite().data["invite_url"].removeprefix("/invite/")
+        self.client.force_authenticate(None)
+        payload = {"token": raw, "password": "a-strong-pass-123"}
+        self.client.post(
+            "/api/auth/accept-invite/", {**payload, "username": "emeka"}, format="json", REMOTE_ADDR="198.51.100.10"
+        )
+        again = self.client.post(
+            "/api/auth/accept-invite/", {**payload, "username": "chidi"}, format="json", REMOTE_ADDR="198.51.100.11"
+        )
+        self.assertEqual(again.status_code, 400)
+
+    def test_a_made_up_token_is_refused_the_same_way(self):
+        self.client.force_authenticate(None)
+        response = self.client.post(
+            "/api/auth/accept-invite/",
+            {"token": "not-real", "username": "x", "password": "a-strong-pass-123"},
+            format="json",
+            REMOTE_ADDR="198.51.100.12",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_salesperson_cannot_invite_anyone(self):
+        seller = User.objects.create_user("emeka", password=PASSWORD)
+        Membership.create_from_template(self.business, seller, self.sales_template)
+        self.client.force_authenticate(seller)
+        self.assertEqual(self._invite().status_code, 403)
+
+    def test_a_template_from_another_business_is_refused(self):
+        other_owner = User.objects.create_user("bola", password=PASSWORD)
+        other = BusinessProfile.objects.create(user=other_owner, business_name="Bola Cables")
+        provision_business(other, other_owner)
+        theirs = other.role_templates.get(name="Sales")
+
+        response = self.client.post(
+            "/api/invitations/", {"email": "x@y.com", "role_template": theirs.id}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+
+
+class StoreEndpointTests(APITestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user("ada", password=PASSWORD)
+        self.business = BusinessProfile.objects.create(user=self.owner, business_name="Ada Cables")
+        provision_business(self.business, self.owner)
+        self.client.force_authenticate(self.owner)
+
+    def test_a_business_cannot_exceed_its_allowance(self):
+        """The allowance is the operator's lever, so creating branches cannot route around it."""
+        self.assertEqual(self.business.store_limit, 1)
+        response = self.client.post("/api/stores/", {"name": "Ikeja", "code": "IKJ"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("allows 1 store", str(response.data))
+
+    def test_raising_the_allowance_lets_another_branch_open(self):
+        self.business.store_limit = 2
+        self.business.save()
+        response = self.client.post("/api/stores/", {"name": "Ikeja", "code": "ikj"}, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["code"], "IKJ")
+
+
+class RoleTemplateEndpointTests(APITestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user("ada", password=PASSWORD)
+        self.business = BusinessProfile.objects.create(user=self.owner, business_name="Ada Cables")
+        provision_business(self.business, self.owner)
+        self.client.force_authenticate(self.owner)
+
+    def test_a_business_can_define_its_own_role(self):
+        response = self.client.post(
+            "/api/roles/", {"name": "Cashier", "permissions": [Feature.CATALOGUE, Feature.QUOTES]}, format="json"
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertFalse(response.data["is_system"])
+
+    def test_an_unknown_permission_is_refused(self):
+        response = self.client.post("/api/roles/", {"name": "Odd", "permissions": ["fly_a_plane"]}, format="json")
+        self.assertEqual(response.status_code, 400)
+
+    def test_the_owner_role_must_keep_member_management(self):
+        owner_template = self.business.role_templates.get(name=OWNER_TEMPLATE_NAME)
+        response = self.client.patch(
+            f"/api/roles/{owner_template.id}/", {"permissions": [Feature.QUOTES]}, format="json"
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_a_built_in_role_cannot_be_deleted(self):
+        sales = self.business.role_templates.get(name="Sales")
+        self.assertEqual(self.client.delete(f"/api/roles/{sales.id}/").status_code, 400)
+
+    def test_a_custom_role_can_be_deleted(self):
+        created = self.client.post("/api/roles/", {"name": "Cashier", "permissions": []}, format="json").data
+        self.assertEqual(self.client.delete(f"/api/roles/{created['id']}/").status_code, 204)
+
+
+class FeatureListTests(APITestCase):
+    """The permission list is served, not duplicated in the app (see Staff.jsx)."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("ada", password=PASSWORD)
+        self.business = BusinessProfile.objects.create(user=self.user, business_name="Ada Cables")
+        provision_business(self.business, self.user)
+        self.client.force_authenticate(self.user)
+
+    def test_every_feature_is_listed_with_a_label(self):
+        response = self.client.get("/api/features/")
+        self.assertEqual(response.status_code, 200)
+        values = [row["value"] for row in response.data]
+        self.assertEqual(sorted(values), sorted(Feature.values))
+        self.assertTrue(all(row["label"] for row in response.data))
+
+    def test_a_newly_added_feature_appears_without_a_frontend_change(self):
+        """The property this endpoint exists for: no second list to forget to update."""
+        response = self.client.get("/api/features/")
+        self.assertIn(Feature.DISCOUNT, [row["value"] for row in response.data])
